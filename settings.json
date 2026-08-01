@@ -1,0 +1,6 @@
+{
+  "interval_minutes": 10,
+  "report_name": "",
+  "idle_enabled": true,
+  "idle_minutes": 5
+}

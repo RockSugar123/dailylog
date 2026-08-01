@@ -1,0 +1,117 @@
+"""调用千问视觉模型分析截图，返回结构化记录。"""
+import base64
+import json
+import re
+from pathlib import Path
+
+import requests
+
+import config
+
+ANALYZE_PROMPT = """你是工作日志记录助手。分析这张屏幕截图，记录此刻正在进行的工作活动。
+
+【核心原则】
+1. 尽可能记录有日报价值的工作内容：工作主题、任务名称、项目方向、需求内容、技术问题、交付物、进展、待办。
+2. 保护隐私：不记录私人聊天细节、联系人身份、账号、密钥、完整链接等敏感信息。
+3. 隐私保护不等于空泛描述：只脱敏"身份信息"和"敏感字段"，工作任务本身尽量保留细节。
+
+【你应该记录什么】
+1. 当前正在做的具体工作任务。
+2. 当前正在阅读、编辑、核对、调试、整理、沟通的内容主题。
+3. 任务所属工作方向，如：产品设计、代码开发、运营分析、数据复盘、客户支持、项目管理、日报整理、资料研究等。
+4. 能用于日报的具体进展、待办、交付物。
+5. 若在聊天工具里处理工作，提取"工作事项"和"任务含义"，不复述原文。
+
+【你不应该记录什么】
+1. 桌面壁纸、系统状态栏、时间、电量、天气、Dock、任务栏等无关信息。
+2. 联系人昵称、群名、备注名、头像文字、账号名。
+3. 聊天消息逐字内容、私人聊天细节。
+4. 手机号、邮箱、身份证、银行卡、地址、验证码、密码、Token、API Key、Cookie。
+5. 客户个人身份、员工个人身份、具体薪酬绩效、敏感财务明细。
+
+【沟通界面处理（微信/飞书/钉钉/Slack/邮件/私信/群聊等）】
+允许输出：沟通的工作主题、任务方向、可识别的工作需求/待办/结论/进展、文件或链接的大致用途、正在处理这些沟通的行为。
+禁止输出：联系人是谁、群名、对方原话、逐字内容、完整链接、账号、手机号、邮箱、订单号、密钥。
+示例："做海龟策略回测" → 输出"正在处理量化交易策略回测相关任务"。
+私人闲聊 → 只输出"当前包含私人沟通内容，已脱敏，不纳入日报"。
+
+【输出要求】
+1. 只输出一个 JSON 对象，不要输出任何其他文字、注释或 markdown 代码块标记。
+2. 截图无工作内容（纯私人界面、壁纸、无活动）时 summary 输出"无工作活动"。
+3. 不要编造截图中不存在的内容。
+4. 隐私与工作记录冲突时，优先保留"脱敏后的工作事项"。
+
+{
+  "activity": "coding|writing|meeting|research|communication|data|support|browsing|idle|other",
+  "summary": "不超过40字的中文工作摘要",
+  "detail": "任务名称/主题/项目方向，保留工作细节，脱敏身份",
+  "progress": "进展或交付物，没有则为空字符串",
+  "todo": "识别到的待办，没有则为空字符串",
+  "apps": ["检测到的应用/网站"],
+  "contains_sensitive": true
+}"""
+
+REQUIRED_FIELDS = ("activity", "summary", "detail", "progress", "todo", "apps", "contains_sensitive")
+
+
+def encode_image(png_path: Path) -> str:
+    """PNG 文件 → base64 data URL。"""
+    data = base64.b64encode(png_path.read_bytes()).decode()
+    return f"data:image/png;base64,{data}"
+
+
+def parse_json(content: str) -> dict:
+    """宽容解析模型输出：整体解析失败则提取首个 {...} 块。"""
+    content = content.strip()
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", content, re.S)
+        if not match:
+            raise ValueError(f"模型输出无法解析为 JSON: {content[:200]}")
+        result = json.loads(match.group(0))
+    if not isinstance(result, dict):
+        raise ValueError(f"模型输出不是 JSON 对象: {content[:200]}")
+    return result
+
+
+def normalize(result: dict) -> dict:
+    """校验并补齐必填字段，未知 activity 归为 other。"""
+    result = {k: result.get(k, [] if k == "apps" else "") for k in REQUIRED_FIELDS}
+    result["activity"] = result["activity"] if result["activity"] in config.ACTIVITY_LABELS else "other"
+    for k in ("summary", "detail", "progress", "todo"):
+        if not isinstance(result[k], str):
+            result[k] = ""
+    if not isinstance(result["apps"], list):
+        result["apps"] = []
+    return result
+
+
+# 共享会话：trust_env=False 彻底忽略环境/系统代理（用户代理工具关闭时 env 代理会导致全部调用失败）
+_SESSION = requests.Session()
+_SESSION.trust_env = False
+
+
+def call_analyze(image_url: str) -> dict:
+    """调千问视觉模型分析截图，返回规范化 dict；失败抛异常。"""
+    resp = _SESSION.post(
+        f"{config.DASHSCOPE_BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
+        json={
+            "model": config.ANALYZE_MODEL,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": ANALYZE_PROMPT},
+                ],
+            }],
+            "response_format": {"type": "json_object"},
+        },
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        # 带响应体抛出，否则日志里只有 "400 Bad Request" 无法定位
+        raise RuntimeError(f"千问 API HTTP {resp.status_code}: {resp.text[:300]}")
+    content = resp.json()["choices"][0]["message"]["content"]
+    return normalize(parse_json(content))

@@ -1,0 +1,18 @@
+# API 密钥（绝不可提交）
+.env
+
+# 运行时数据（含个人工作记录、截图、日志）
+records/
+reports/
+screenshots/
+state.json
+dailylog.log
+
+# 打包产物（dist/ 内含 .env 密钥副本与个人数据）
+build/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

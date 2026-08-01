@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>dailylog · 今日轨迹</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="style.css" />
+<script src="script.js" defer></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- 自定义标题栏（手动拖拽） -->
+  <header class="titlebar" id="titlebar">
+    <div class="tb-brand">dailylog<span class="tb-sub">今日轨迹</span></div>
+    <button class="tb-rec" id="rec-toggle" aria-pressed="true" title="截屏记录总开关">
+      <span class="rec-text" id="rec-label-tb">记录中</span>
+      <span class="rec-switch" aria-hidden="true"><span class="rec-knob"></span></span>
+    </button>
+    <div class="tb-controls">
+      <button class="tb-btn" id="win-min" aria-label="最小化">─</button>
+      <button class="tb-btn" id="win-max" aria-label="最大化">□</button>
+      <button class="tb-btn tb-close" id="win-close" aria-label="关闭到托盘">✕</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧常驻侧边栏 -->
+    <aside class="sidebar">
+      <nav class="side-nav">
+        <a class="side-item active" data-page="timeline"><span class="side-ico">◉</span>时间线</a>
+        <a class="side-item" data-page="reports"><span class="side-ico">▤</span>日报周报</a>
+        <a class="side-item" data-page="settings"><span class="side-ico">⚙</span>设置</a>
+      </nav>
+      <nav class="side-nav side-secondary">
+        <a class="side-item" id="side-privacy"><span class="side-ico">♡</span>隐私保护</a>
+        <a class="side-item" id="side-about"><span class="side-ico">i</span>关于</a>
+      </nav>
+      <div class="side-foot">定时记录 <span class="rec-dot" id="rec-dot"></span><span class="side-next" id="side-next"></span></div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main">
+
+      <!-- ===== 时间线页 ===== -->
+      <section class="page" id="page-timeline">
+        <div class="page-desc">查看全天工作活动轨迹，了解时间都花在了哪里</div>
+
+        <div class="filter-bar">
+          <div class="date-range">
+            <input type="date" id="range-start" aria-label="开始日期" />
+            <span class="date-split">至</span>
+            <input type="date" id="range-end" aria-label="结束日期" />
+            <div class="presets">
+              <button class="btn-ghost preset" data-days="0">今天</button>
+              <button class="btn-ghost preset" data-days="7">近7天</button>
+              <button class="btn-ghost preset" data-days="30">近30天</button>
+            </div>
+          </div>
+          <label class="switch-label"><input type="checkbox" id="tl-desc" checked /> 最新在上</label>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-value" id="st-count">–</div><div class="stat-label">记录条数</div></div>
+          <div class="stat-card"><div class="stat-value" id="st-range">–</div><div class="stat-label">活跃时段</div></div>
+          <div class="stat-card"><div class="stat-value" id="st-focus">–</div><div class="stat-label">专注时长（估算）</div></div>
+        </div>
+
+        <div class="panel" id="panel-cats" hidden>
+          <div class="panel-head">分类时长分布 <span class="hint">按记录间隔估算</span></div>
+          <div class="cat-list" id="cat-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">活动时间线 <span class="hint" id="tl-count"></span></div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+      </section>
+
+      <!-- ===== 日报周报页 ===== -->
+      <section class="page" id="page-reports" hidden>
+        <div class="page-desc">从时间线归纳成果、进展与待办，写周报不再从零开始</div>
+
+        <div class="report-actions">
+          <button class="btn-primary" id="gen-day">↗ 生成今天的日报</button>
+          <button class="btn-ghost" id="gen-week">↗ 生成本周周报</button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">历史报告 <span class="hint" id="report-count"></span></div>
+          <div class="report-list" id="report-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== 设置页 ===== -->
+      <section class="page" id="page-settings" hidden>
+        <div class="page-desc">配置截屏间隔与模型通道</div>
+
+        <div class="panel">
+          <div class="panel-head">记录配置</div>
+          <div class="settings-row">
+            <label for="set-interval">截屏间隔</label>
+            <div class="select-wrap" id="interval-wrap">
+              <button class="select-btn" id="interval-btn">每 10 分钟<span class="caret">▾</span></button>
+              <div class="select-pop" id="interval-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label for="set-name">汇报人</label>
+            <input type="text" id="set-name" maxlength="20" placeholder="留空则不输出" />
+          </div>
+          <div class="settings-row">
+            <label>空闲暂停</label>
+            <label class="switch-label"><input type="checkbox" id="idle-enabled" checked /> 鼠标静止时暂停截屏</label>
+            <div class="select-wrap" id="idle-wrap">
+              <button class="select-btn" id="idle-btn">5 分钟<span class="caret">▾</span></button>
+              <div class="select-pop" id="idle-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <button class="btn-primary" id="set-save">保存</button>
+          </div>
+          <div class="panel-head head-gap">当前状态</div>
+          <dl class="settings-status" id="settings-status"></dl>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- 无边框窗口：右下角缩放手柄 -->
+  <div class="resize-grip" id="resize-grip" title="拖动缩放窗口"></div>
+</div>
+
+<!-- 弹窗层 -->
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal" id="modal" role="dialog">
+    <header class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" id="modal-close" aria-label="关闭">×</button>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+    <footer class="modal-foot" id="modal-foot" hidden></footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+</body>
+</html>
