@@ -72,8 +72,8 @@ pip install -r requirements.txt
 按 [.env.example](.env.example) 的键名填写（开发期放源码目录，打包后放 exe 同目录——打包版只读 exe 旁边的 .env）：
 
 ```
-DASHSCOPE_API_KEY=你的百炼Key
-DEEPSEEK_API_KEY=你的DeepSeekKey
+DASHSCOPE_API_KEY=sk-你的百炼Key
+DEEPSEEK_API_KEY=sk-你的DeepSeekKey
 ```
 
 ## 运行方式
