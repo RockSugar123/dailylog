@@ -1,12 +1,11 @@
-"""调用千问视觉模型分析截图，返回结构化记录。"""
+"""调用 NVIDIA NIM 视觉模型分析截图，返回结构化记录。"""
 import base64
 import json
 import re
 from pathlib import Path
 
-import requests
-
 import config
+import llm
 
 ANALYZE_PROMPT = """你是工作日志记录助手。分析这张屏幕截图，记录此刻正在进行的工作活动。
 
@@ -87,31 +86,21 @@ def normalize(result: dict) -> dict:
     return result
 
 
-# 共享会话：trust_env=False 彻底忽略环境/系统代理（用户代理工具关闭时 env 代理会导致全部调用失败）
-_SESSION = requests.Session()
-_SESSION.trust_env = False
-
-
 def call_analyze(image_url: str) -> dict:
-    """调千问视觉模型分析截图，返回规范化 dict；失败抛异常。"""
-    resp = _SESSION.post(
-        f"{config.DASHSCOPE_BASE_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {config.DASHSCOPE_API_KEY}"},
-        json={
-            "model": config.ANALYZE_MODEL,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                    {"type": "text", "text": ANALYZE_PROMPT},
-                ],
-            }],
-            "response_format": {"type": "json_object"},
-        },
-        timeout=60,
+    """调 NVIDIA NIM 视觉模型分析截图，返回规范化 dict；失败抛异常。"""
+    content = llm.call_chat(
+        config.ANALYZE_BASE_URL, config.ANALYZE_API_KEY, config.ANALYZE_MODEL,
+        [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": ANALYZE_PROMPT},
+            ],
+        }],
+        label="截图分析",
+        temperature=config.ANALYZE_TEMPERATURE,
+        top_p=config.ANALYZE_TOP_P,
+        max_tokens=config.ANALYZE_MAX_TOKENS,
+        stream=False,
     )
-    if resp.status_code != 200:
-        # 带响应体抛出，否则日志里只有 "400 Bad Request" 无法定位
-        raise RuntimeError(f"千问 API HTTP {resp.status_code}: {resp.text[:300]}")
-    content = resp.json()["choices"][0]["message"]["content"]
     return normalize(parse_json(content))

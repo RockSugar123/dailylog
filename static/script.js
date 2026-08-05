@@ -28,10 +28,7 @@ function getApi() {
 async function apiCall(name, ...args) {
   const api = getApi();
   if (!api) return null;
-  // pywebview 可能按原样、驼峰或下划线任意一种暴露方法，三种都试
-  let fn = api[name];
-  if (typeof fn !== "function") fn = api[name[0].toLowerCase() + name.slice(1)];
-  if (typeof fn !== "function") fn = api[name.replace(/([A-Z])/g, "_$1").toLowerCase()];
+  const fn = api[name];
   if (typeof fn !== "function") {
     console.warn("API 方法不存在:", name);
     return null;
@@ -70,12 +67,12 @@ function catColor(label) { return CAT_COLORS[label] || "#6b7280"; }
 /* ===================== 通用 UI ===================== */
 
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 2600) {
   const el = document.getElementById("toast");
   el.textContent = msg;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 const backdrop = document.getElementById("modal-backdrop");
@@ -165,11 +162,11 @@ function bindResizeGrip() {
 
 document.getElementById("win-min").addEventListener("click", () => apiCall("minimize"));
 document.getElementById("win-max").addEventListener("click", () => apiCall("maximize"));
-document.getElementById("win-close").addEventListener("click", () => apiCall("closeWindow"));
+document.getElementById("win-close").addEventListener("click", () => apiCall("close_window"));
 
 /* ===================== 页面切换 ===================== */
 
-const PAGES = { timeline: "page-timeline", reports: "page-reports", settings: "page-settings" };
+const PAGES = { timeline: "page-timeline", todos: "page-todos", reports: "page-reports", logs: "page-logs", settings: "page-settings" };
 
 document.querySelectorAll(".side-item[data-page]").forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.page));
@@ -177,9 +174,35 @@ document.querySelectorAll(".side-item[data-page]").forEach((item) => {
 function switchPage(name) {
   document.querySelectorAll(".side-item[data-page]").forEach((i) => i.classList.toggle("active", i.dataset.page === name));
   Object.entries(PAGES).forEach(([key, id]) => { document.getElementById(id).hidden = key !== name; });
+  if (name === "todos") loadTodos();
   if (name === "reports") loadReports();
+  if (name === "logs") loadLogs();
   if (name === "settings") loadSettings();
 }
+
+/* ===================== 日志页 ===================== */
+
+async function loadLogs() {
+  const r = await apiCall("get_logs");
+  const el = document.getElementById("logs-list");
+  const count = document.getElementById("logs-count");
+  if (!r || !r.ok) {
+    el.innerHTML = `<div class="logs-empty">读取失败：${escapeHtml(r ? r.error : "无响应")}</div>`;
+    count.textContent = "";
+    return;
+  }
+  if (!r.logs.length) {
+    el.innerHTML = '<div class="logs-empty">暂无日志</div>';
+    count.textContent = "";
+    return;
+  }
+  count.textContent = `共 ${r.logs.length} 条`;
+  el.innerHTML = r.logs.map((l) => {
+    const cls = l.level === "ERROR" ? " log-err" : l.level === "WARNING" ? " log-warn" : "";
+    return `<div class="log-line${cls}"><span class="log-ts">${escapeHtml(l.ts)}</span><span class="log-lv">${escapeHtml(l.level)}</span><span class="log-msg">${escapeHtml(l.msg)}</span></div>`;
+  }).join("");
+}
+document.getElementById("logs-refresh").addEventListener("click", loadLogs);
 
 /* ===================== 时间线页 ===================== */
 
@@ -216,6 +239,15 @@ async function refreshTimelineIfChanged() {
   loadTimeline();
 }
 
+function recordDuration(records, i) {
+  // 该条记录估测时长：与下一条间隔（截断到 1~60 分钟），最后一条按当前设置间隔估算
+  if (i < records.length - 1) {
+    const gap = (new Date(records[i + 1].ts) - new Date(records[i].ts)) / 60000;
+    return Math.max(1, Math.min(60, gap));
+  }
+  return currentInterval || 10;
+}
+
 function renderStats() {
   const n = timelineRecords.length;
   document.getElementById("st-count").textContent = n;
@@ -223,13 +255,7 @@ function renderStats() {
   const focus = document.getElementById("st-focus");
   if (!n) { el.textContent = "–"; focus.textContent = "–"; return; }
   el.textContent = `${fmtHM(timelineRecords[0].ts)} — ${fmtHM(timelineRecords[n - 1].ts)}`;
-  const totalMin = timelineRecords.reduce((sum, r, i) => {
-    if (i < n - 1) {
-      const gap = (new Date(timelineRecords[i + 1].ts) - new Date(r.ts)) / 60000;
-      return sum + Math.max(1, Math.min(60, gap));
-    }
-    return sum + (currentInterval || 10);  // 最后一条按当前设置间隔估算
-  }, 0);
+  const totalMin = timelineRecords.reduce((sum, _, i) => sum + recordDuration(timelineRecords, i), 0);
   focus.textContent = totalMin >= 60 ? `${Math.floor(totalMin / 60)}h` : `${Math.floor(totalMin)}m`;
 }
 
@@ -240,9 +266,7 @@ function renderCats() {
   const byCat = {};
   timelineRecords.forEach((r, i) => {
     const label = r.label || "其他";
-    const dur = i < timelineRecords.length - 1
-      ? Math.max(1, Math.min(60, (new Date(timelineRecords[i + 1].ts) - new Date(r.ts)) / 60000))
-      : (currentInterval || 10);  // 最后一条按当前设置间隔估算
+    const dur = recordDuration(timelineRecords, i);
     byCat[label] = (byCat[label] || 0) + dur;
   });
   const total = Object.values(byCat).reduce((a, b) => a + b, 0);
@@ -356,6 +380,10 @@ async function loadReports() {
 let currentInterval = 10;
 let currentIdleMin = 5;
 let idleEnabled = true;
+let currentRetention = 0;
+let dedupEnabled = true;
+let enterEnabled = false;
+let currentEnterInterval = 15;
 
 function statusHtml(cfg) {
   const next = cfg.recording_enabled
@@ -392,16 +420,29 @@ async function loadSettings() {
   };
   currentInterval = cfg.interval_minutes || 10;
   setupSelect("interval-pop", "interval-btn", cfg.interval_choices || [5, 10, 15, 30, 60],
-    (m) => `每 ${m} 分钟`, (v) => { currentInterval = v; }, currentInterval);
+    (m) => `每 ${m} 分钟`, (v) => { currentInterval = Number(v); }, currentInterval);
   idleEnabled = cfg.idle_enabled !== false;
   currentIdleMin = cfg.idle_minutes || 5;
   setupSelect("idle-pop", "idle-btn", cfg.idle_choices || [1, 2, 5, 10, 15, 20, 30],
-    (m) => `${m} 分钟`, (v) => { currentIdleMin = v; }, currentIdleMin);
+    (m) => `${m} 分钟`, (v) => { currentIdleMin = Number(v); }, currentIdleMin);
   document.getElementById("idle-enabled").checked = idleEnabled;
   document.getElementById("idle-btn").disabled = !idleEnabled;
   document.getElementById("idle-wrap").style.opacity = idleEnabled ? "1" : "0.45";
   document.getElementById("set-name").value = cfg.report_name || "";
+  currentRetention = cfg.retention_days || 0;
+  setupSelect("retention-pop", "retention-btn", cfg.retention_choices || [0, 7, 14, 30, 60, 90],
+    (d) => (Number(d) === 0 ? "永久保留" : `保留 ${Number(d)} 天`), (v) => { currentRetention = Number(v); }, currentRetention);
+  dedupEnabled = cfg.dedup_enabled !== false;
+  document.getElementById("dedup-enabled").checked = dedupEnabled;
+  enterEnabled = !!cfg.enter_capture_enabled;
+  currentEnterInterval = cfg.enter_capture_interval || 15;
+  setupSelect("enter-pop", "enter-btn", cfg.enter_interval_choices || [5, 15, 30, 60],
+    (s) => `${s} 秒`, (v) => { currentEnterInterval = Number(v); }, currentEnterInterval);
+  document.getElementById("enter-enabled").checked = enterEnabled;
+  document.getElementById("enter-btn").disabled = !enterEnabled;
+  document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
   updateStatus(cfg);
+  loadDbStats();
 }
 
 // 供 Python（托盘开关/启动）调用：刷新定时记录状态与下次截屏时间
@@ -418,10 +459,12 @@ async function refreshStatus() {
   if (wantFast && !isFast) { scheduleRefresh(10000); refreshTimer._fast = true; }
   else if (!wantFast && isFast) { scheduleRefresh(60000); refreshTimer._fast = false; }
   updateStatus(cfg);
+  if (!document.getElementById("page-logs").hidden) loadLogs();  // 日志页可见时跟随刷新
 }
 scheduleRefresh(60000);
 
-/* 自定义下拉（原生 select 弹出层白底不可控），interval 与 idle 复用 */
+/* 自定义下拉（原生 select 弹出层白底不可控）。值不自动转数字：字符串值（如待办状态）
+   原样传给 onPick，数字值的调用方自行 Number() 转换。 */
 function setupSelect(popId, btnId, choices, labelFn, onPick, current) {
   const pop = document.getElementById(popId);
   const btn = document.getElementById(btnId);
@@ -430,8 +473,8 @@ function setupSelect(popId, btnId, choices, labelFn, onPick, current) {
     opt.addEventListener("click", (e) => {
       e.stopPropagation();
       btn.dataset.v = opt.dataset.v;
-      onPick(Number(opt.dataset.v));
-      btn.innerHTML = `${labelFn(Number(opt.dataset.v))}<span class="caret">▾</span>`;
+      onPick(opt.dataset.v);
+      btn.innerHTML = `${labelFn(opt.dataset.v)}<span class="caret">▾</span>`;
       pop.hidden = true;
     });
   });
@@ -439,18 +482,190 @@ function setupSelect(popId, btnId, choices, labelFn, onPick, current) {
     btn.addEventListener("click", (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });
     btn.dataset.bound = "1";
   }
-  btn.dataset.v = current ?? choices[0];
-  btn.innerHTML = `${labelFn(Number(btn.dataset.v))}<span class="caret">▾</span>`;
+  btn.dataset.v = String(current ?? choices[0]);
+  btn.innerHTML = `${labelFn(btn.dataset.v)}<span class="caret">▾</span>`;
 }
 
 document.addEventListener("click", () => {
   document.querySelectorAll(".select-pop").forEach((p) => { p.hidden = true; });
 });
 
+/* 手动截屏：设置页按钮触发，5 秒倒计时后调后端（防重入）。
+   倒计时期间窗口可见，用户可切走；后端截屏时会自动隐藏本窗口再恢复。 */
+let manualTimer = null;
+function startManualCapture() {
+  if (manualTimer) return;
+  let n = 5;
+  toast("5 秒后截取当前屏幕，可先切换窗口…");
+  manualTimer = setInterval(async () => {
+    n--;
+    if (n <= 0) {
+      clearInterval(manualTimer);
+      manualTimer = null;
+      toast("正在分析屏幕…（约 10-60 秒）", 0); // 持久显示，完成后再替换
+      const r = await apiCall("manual_capture");
+      toast(r && r.ok ? "已记录本次截屏" : "记录失败，详见 dailylog.log", r && r.ok ? 2600 : 6000);
+      refreshStatus();
+    } else {
+      toast(`${n} 秒后截取当前屏幕…`);
+    }
+  }, 1000);
+}
+document.getElementById("manual-capture").addEventListener("click", startManualCapture);
+
 document.getElementById("idle-enabled").addEventListener("change", (e) => {
   idleEnabled = e.target.checked;
   document.getElementById("idle-btn").disabled = !idleEnabled;
   document.getElementById("idle-wrap").style.opacity = idleEnabled ? "1" : "0.45";
+});
+document.getElementById("enter-enabled").addEventListener("change", (e) => {
+  enterEnabled = e.target.checked;
+  document.getElementById("enter-btn").disabled = !enterEnabled;
+  document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
+});
+
+/* ===================== 待办页 ===================== */
+
+let todoItems = [];
+let todoStatusFilter = "全部状态";
+let todoPriorityFilter = "全部优先级";
+let todoSearch = "";
+
+const TODO_STATUSES = ["未开始", "进行中", "已完成", "归档"];
+const PRIO_COLORS = { "高": "#ef4444", "中": "#f59e0b", "低": "#6b7280" };
+
+async function loadTodos() {
+  todoItems = (await apiCall("get_todos")) || [];
+  renderTodos();
+}
+
+function renderTodos() {
+  const kw = todoSearch.trim();
+  const filtered = todoItems.filter((it) =>
+    (todoStatusFilter === "全部状态" || it.status === todoStatusFilter) &&
+    (todoPriorityFilter === "全部优先级" || it.priority === todoPriorityFilter) &&
+    (!kw || it.text.includes(kw)));
+  const el = document.getElementById("todo-list");
+  document.getElementById("todo-count").textContent = filtered.length ? `${filtered.length} 条` : "";
+  if (!filtered.length) {
+    el.innerHTML = `<div class="tl-empty">没有匹配的待办。</div>`;
+    return;
+  }
+  el.innerHTML = filtered.map((it) => {
+    const done = it.status === "已完成";
+    const pc = PRIO_COLORS[it.priority] || "#6b7280";
+    const ai = it.source === "ai" ? `<span class="tl-tag" style="background:#2563eb24;color:#2563eb">AI</span>` : "";
+    return `
+    <div class="todo-item${done ? " done" : ""}" data-id="${escapeHtml(it.id)}">
+      <input type="checkbox" class="todo-check" ${done ? "checked" : ""} title="标记完成/未完成" />
+      <span class="todo-text">${mdInline(it.text)}</span>
+      ${ai}
+      <span class="tl-tag" style="background:${pc}24;color:${pc}">${escapeHtml(it.priority)}</span>
+      <select class="todo-status-sel" title="切换状态">
+        ${TODO_STATUSES.map((s) => `<option ${s === it.status ? "selected" : ""}>${s}</option>`).join("")}
+      </select>
+      <span class="todo-ts hint">${escapeHtml((it.ts || "").slice(0, 10))}</span>
+      <button class="todo-del" title="删除">✕</button>
+    </div>`;
+  }).join("");
+  el.querySelectorAll(".todo-item").forEach((row) => {
+    const id = row.dataset.id;
+    row.querySelector(".todo-check").addEventListener("change", async (e) => {
+      const r = await apiCall("set_todo_status", id, e.target.checked ? "已完成" : "未开始");
+      if (r && r.ok) loadTodos(); else toast((r && r.error) || "更新失败");
+    });
+    row.querySelector(".todo-status-sel").addEventListener("change", async (e) => {
+      const r = await apiCall("set_todo_status", id, e.target.value);
+      if (r && r.ok) loadTodos(); else toast((r && r.error) || "更新失败");
+    });
+    row.querySelector(".todo-del").addEventListener("click", async () => {
+      const r = await apiCall("delete_todo", id);
+      toast(r && r.ok ? "已删除" : ((r && r.error) || "删除失败"));
+      if (r && r.ok) loadTodos();
+    });
+  });
+}
+
+/* 状态/优先级筛选 + 搜索（全在前端过滤，数据量小） */
+setupSelect("todo-status-pop", "todo-status-btn", ["全部状态", ...TODO_STATUSES],
+  (v) => v, (v) => { todoStatusFilter = v; renderTodos(); }, "全部状态");
+setupSelect("todo-priority-pop", "todo-priority-btn", ["全部优先级", "高", "中", "低"],
+  (v) => v, (v) => { todoPriorityFilter = v; renderTodos(); }, "全部优先级");
+document.getElementById("todo-search").addEventListener("input", (e) => {
+  todoSearch = e.target.value;
+  renderTodos();
+});
+
+/* 新建待办弹窗：内容输入 + 优先级选择 */
+document.getElementById("todo-add").addEventListener("click", () => {
+  const prioBtns = ["高", "中", "低"].map((p) => `<button class="prio-opt${p === "中" ? " sel" : ""}" data-p="${p}">${p}</button>`).join("");
+  openModal("新建待办",
+    `<input type="text" id="todo-new-text" maxlength="100" placeholder="要做什么？" class="modal-input" />
+     <div style="margin-top:12px"><span class="hint">优先级</span>
+       <div class="prio-pick">${prioBtns}</div>
+     </div>`,
+    `<button class="btn-primary" id="todo-new-ok">添加</button>`);
+  let prio = "中";
+  document.querySelectorAll(".prio-opt").forEach((b) => {
+    b.addEventListener("click", () => {
+      prio = b.dataset.p;
+      document.querySelectorAll(".prio-opt").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel");
+    });
+  });
+  const doAdd = async () => {
+    const text = document.getElementById("todo-new-text").value.trim();
+    if (!text) { toast("待办内容不能为空"); return; }
+    const r = await apiCall("add_todo", text, prio);
+    if (r && r.ok) { toast("已添加待办"); closeModal(); loadTodos(); }
+    else toast((r && r.error) || "添加失败");
+  };
+  document.getElementById("todo-new-ok").addEventListener("click", doAdd);
+  document.getElementById("todo-new-text").addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
+  document.getElementById("todo-new-text").focus();
+});
+
+/* ===================== 数据管理 ===================== */
+
+async function loadDbStats() {
+  const s = await apiCall("db_stats");
+  if (!s) return;
+  const vals = document.querySelectorAll("#db-stats .db-value");
+  if (vals.length === 4) {
+    vals[0].textContent = s.size_mb >= 1 ? `${s.size_mb} MB` : `${s.size_kb} KB`;
+    vals[1].textContent = s.timeline_count;
+    vals[2].textContent = s.report_count;
+    vals[3].textContent = s.log_count;
+  }
+}
+
+document.getElementById("export-data").addEventListener("click", async () => {
+  const r = await apiCall("export_data_dialog");
+  if (!r) { toast("未连接到后端"); return; }
+  if (r.ok) toast(`已导出到 ${r.path}`);
+  else if (!r.cancelled) toast(r.error || "导出失败");
+});
+
+document.getElementById("import-data").addEventListener("click", async () => {
+  const r = await apiCall("import_data_dialog");
+  if (!r) { toast("未连接到后端"); return; }
+  if (r.ok) {
+    toast(`导入完成：记录 ${r.records} 天、报告 ${r.reports} 份`);
+    loadDbStats();
+  } else if (!r.cancelled) toast(r.error || "导入失败");
+});
+
+document.getElementById("clear-data").addEventListener("click", () => {
+  openModal("清除历史数据",
+    `<p style="color:var(--danger,#ef4444);margin:0 0 8px">将删除：时间线记录（jsonl + md）、生成的报告、本地日志、待办列表。</p>
+     <p class="hint" style="margin:0">保留：API Key 配置（.env）与设置。</p>`,
+    `<button class="btn-danger" id="clear-ok">确认删除</button>`);
+  document.getElementById("clear-ok").addEventListener("click", async () => {
+    const r = await apiCall("clear_data");
+    closeModal();
+    toast(r && r.ok ? `已清除 ${r.records} 条记录、${r.reports} 份报告` : ((r && r.error) || "清除失败"));
+    if (r && r.ok) loadDbStats();
+  });
 });
 
 document.getElementById("set-save").addEventListener("click", async () => {
@@ -458,9 +673,13 @@ document.getElementById("set-save").addEventListener("click", async () => {
   const name = document.getElementById("set-name").value.trim();
   const rn = await apiCall("set_report_name", name);
   const rd = await apiCall("set_idle", idleEnabled, currentIdleMin);
-  const firstErr = [ri, rn, rd].find((r) => r && !r.ok);
-  if (ri && ri.ok && rn && rn.ok && rd && rd.ok) {
-    toast(`已保存：间隔每 ${ri.interval_minutes} 分钟，空闲${idleEnabled ? currentIdleMin + " 分钟暂停" : "暂停关闭"}${name ? "，汇报人 " + name : ""}`);
+  const rr = await apiCall("set_retention", currentRetention);
+  const rdu = await apiCall("set_dedup", dedupEnabled);
+  const re = await apiCall("set_enter_capture", enterEnabled, currentEnterInterval);
+  const results = [ri, rn, rd, rr, rdu, re];
+  const firstErr = results.find((r) => r && !r.ok);
+  if (results.every((r) => r && r.ok)) {
+    toast(`已保存：间隔每 ${ri.interval_minutes} 分钟，空闲${idleEnabled ? currentIdleMin + " 分钟暂停" : "暂停关闭"}，记录${currentRetention ? "保留 " + currentRetention + " 天" : "永久保留"}，去重${dedupEnabled ? "开" : "关"}，回车${enterEnabled ? "开" : "关"}${name ? "，汇报人 " + name : ""}`);
   } else {
     toast((firstErr && firstErr.error) || "保存失败（浏览器预览不可用）");
   }
@@ -480,14 +699,14 @@ document.getElementById("side-privacy").addEventListener("click", () => {
   openModal("隐私保护",
     `<p>1. <b>即用即删</b>：截屏只在分析瞬间存在，分析完立即删除，磁盘不保留原始画面。</p>
      <p>2. <b>输出脱敏</b>：分析模型被要求不输出密码、密钥、验证码、联系人身份、私人聊天内容等，只用占位符概括。</p>
-     <p>3. <b>边界说明</b>：截屏明文会上传阿里云百炼服务端，脱敏规则只约束"输出"，不约束"输入"。</p>
+     <p>3. <b>边界说明</b>：截屏明文会上传 NVIDIA NIM 服务端，脱敏规则只约束"输出"，不约束"输入"。</p>
      <p>4. 时间线记录仅保存在本机 dailylog 目录。</p>`);
 });
 document.getElementById("side-about").addEventListener("click", () => {
   openModal("关于",
     `<p><b>dailylog · 今日轨迹</b></p>
      <p>每 10 分钟自动截屏分析，把一天的工作记录成时间线，一键生成日报周报。</p>
-     <p style="color:var(--faint);font-size:12px">截图分析：qwen3.5-omni-plus（阿里百炼）<br>日报周报：deepseek-v4-flash（DeepSeek）</p>`);
+     <p style="color:var(--faint);font-size:12px">截图分析：minimaxai/minimax-m3（NVIDIA NIM）<br>日报周报：deepseek-v4-flash（DeepSeek）</p>`);
 });
 
 /* ===================== 事件绑定 ===================== */

@@ -7,7 +7,9 @@
 注：pywebview 6 移除了内置托盘，这里用 pystray 实现（标准组合方案）。
 """
 import json
+import shutil
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -20,8 +22,29 @@ import capture
 import config
 import ui_api
 
-BASE_DIR = Path(__file__).resolve().parent
 _logger = config.setup_logging()
+
+
+def _cleanup_stale_webview() -> None:
+    """清理 pywebview 历史残留的临时 WebView2 数据目录（%TEMP%/tmp*/EBWebView，超 7 天）。
+
+    老版本每次启动都在临时目录新建数据目录且不清理（累计可达数百 MB）；
+    现已固定到 config.WEBVIEW_DIR，这里只做一次性历史清理，当前/近期目录不动。
+    """
+    base = Path(tempfile.gettempdir())
+    cutoff = time.time() - 7 * 86400
+    for d in base.iterdir():
+        if not d.is_dir() or not d.name.startswith("tmp") or not (d / "EBWebView").is_dir():
+            continue
+        try:
+            if d.stat().st_mtime < cutoff:
+                shutil.rmtree(
+                    d,
+                    onexc=lambda _f, p, e: _logger.warning("清理 WebView2 残留失败 %s: %s", p, e),
+                )
+                _logger.info("已清理残留 WebView2 目录: %s", d)
+        except OSError as e:
+            _logger.warning("清理 WebView2 残留失败 %s: %s", d, e)
 
 
 def resource_path(rel: str) -> Path:
@@ -51,6 +74,45 @@ class AppApi(ui_api.Api):
             pass
         return result
 
+    def manual_capture(self) -> dict:
+        """设置页按钮/全局热键触发：立即截屏分析记录（force 跳过去重与空闲检查）。"""
+        try:
+            code = capture.main(force=True)
+            return {"ok": code == 0}
+        except Exception as e:  # noqa: BLE001
+            _logger.error("手动截屏失败: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    def export_data_dialog(self) -> dict:
+        """数据管理·导出：系统保存对话框选路径后写 JSON 备份。
+
+        pywebview 的 create_file_dialog 在 winforms 下返回 (路径,) 元组，取消返回 None。
+        """
+        try:
+            result = self._window.create_file_dialog(
+                webview.SAVE_DIALOG, save_filename="dailylog-backup.json",
+                file_types=("JSON 备份 (*.json)",),
+            )
+        except Exception as e:  # noqa: BLE001
+            _logger.error("导出对话框失败: %s", e)
+            return {"ok": False, "error": str(e)}
+        if not result:
+            return {"ok": False, "cancelled": True}
+        return self.export_data(result[0])
+
+    def import_data_dialog(self) -> dict:
+        """数据管理·导入：系统打开对话框选备份文件后恢复。"""
+        try:
+            result = self._window.create_file_dialog(
+                webview.OPEN_DIALOG, file_types=("JSON 备份 (*.json)",),
+            )
+        except Exception as e:  # noqa: BLE001
+            _logger.error("导入对话框失败: %s", e)
+            return {"ok": False, "error": str(e)}
+        if not result:
+            return {"ok": False, "cancelled": True}
+        return self.import_data(result[0])
+
     def minimize(self) -> None:
         self._window.minimize()
 
@@ -76,9 +138,18 @@ class AppApi(ui_api.Api):
 
 
 def main() -> None:
+    try:
+        capture.cleanup_expired()  # 启动时按保留天数清理过期数据（每天一次）
+    except Exception as e:  # noqa: BLE001
+        _logger.error("启动数据清理失败: %s", e)
+    try:
+        _cleanup_stale_webview()  # 清理历史残留的临时 WebView2 目录
+    except Exception as e:  # noqa: BLE001
+        _logger.error("残留 WebView2 目录清理失败: %s", e)
+
     api = AppApi(None)  # 窗口对象在 create_window 返回后回填
     window = webview.create_window(
-        "dailylog · 今日轨迹",
+        config.APP_TITLE,
         str(resource_path("static/index.html")),
         width=1280, height=800, min_size=(960, 600),
         frameless=True,
@@ -104,14 +175,14 @@ def main() -> None:
         return False
 
     def on_show(icon=None, item=None):
-        ui_api.enable_task()
+        # 只显示窗口，不碰任务状态：用户上次"停止"的选择必须被尊重（见 startup_enable）
         window.show()
 
-    def run_capture_once():
-        """立即执行一次截屏分析（后台线程），结果弹 toast。"""
+    def run_capture_once(force: bool = False):
+        """立即执行一次截屏分析（后台线程），结果弹 toast。force=True 跳过去重与空闲检查。"""
         def run():
             try:
-                code = capture.main()
+                code = capture.main(force=force)
                 msg = "记录完成" if code == 0 else "记录失败，详见 dailylog.log"
             except Exception as e:  # noqa: BLE001
                 msg = f"记录失败: {e}"
@@ -120,6 +191,43 @@ def main() -> None:
             except Exception:  # noqa: BLE001
                 pass
         threading.Thread(target=run, daemon=True).start()
+
+    def start_enter_listener():
+        """回车键快速记录：全局监听回车键（pynput），间隔内连续按键只记录第一次。
+
+        监听线程常驻（进程不退出，托盘化后仍生效）；开关/间隔每次按键实时读
+        settings.json，设置页改动无需重启监听。pynput 缺失时仅记录错误，不影响其他功能。
+        """
+        try:
+            from pynput import keyboard  # noqa: PLC0415
+        except ImportError as e:
+            _logger.error("回车键快速记录不可用（未安装 pynput）: %s", e)
+            return
+        last_capture = [0.0]
+
+        def on_press(key):
+            try:
+                if key != keyboard.Key.enter:
+                    return
+                if not config.SETTINGS.get("enter_capture_enabled"):
+                    return
+                interval = config.SETTINGS.get("enter_capture_interval", 15)
+                now = time.time()
+                if now - last_capture[0] < interval:
+                    return
+                last_capture[0] = now
+                _logger.info("回车键快速记录触发")
+                run_capture_once(force=True)
+            except Exception as e:  # noqa: BLE001
+                _logger.error("回车键监听回调异常: %s", e)
+
+        try:
+            listener = keyboard.Listener(on_press=on_press)
+            listener.daemon = True
+            listener.start()
+            _logger.info("回车键快速记录监听已启动")
+        except Exception as e:  # noqa: BLE001
+            _logger.error("回车键监听启动失败: %s", e)
 
     def refresh_ui(msg=None):
         try:
@@ -131,7 +239,7 @@ def main() -> None:
             pass
 
     def on_toggle_recording(icon=None, item=None):
-        """开始/停止定时记录开关：启用并立即截屏一次，或停用。"""
+        """开始/停止定时记录开关：启用并立即截屏一次，或停用；持久化用户选择。"""
         recording = ui_api.task_is_enabled()
         if recording:
             ui_api.disable_task()
@@ -140,6 +248,7 @@ def main() -> None:
             ui_api.enable_task()
             msg = "定时记录已开始"
             run_capture_once()  # 立即截屏一次，马上能看到效果
+        ui_api.persist_recording_choice(not recording)
         tray.title = TRAY_STOPPED if recording else TRAY_RUNNING  # recording 是切换前状态，标题需反映切换后
         tray.menu = build_menu()
         refresh_ui(msg)
@@ -176,16 +285,31 @@ def main() -> None:
     )
     threading.Thread(target=tray.run, daemon=True).start()
 
-    def startup_enable():
-        """启动时恢复定时记录；完成后同步托盘菜单文案。"""
+    def refresh_tray_menu():
+        """同步托盘标题与菜单文案到任务真实状态（标题栏切换后也调用）。"""
+        if tray is None:
+            return
         try:
-            ui_api.enable_task()
+            tray.title = TRAY_RUNNING if ui_api.task_is_enabled() else TRAY_STOPPED
+            tray.menu = build_menu()
+        except Exception as e:  # noqa: BLE001
+            _logger.error("同步托盘菜单失败: %s", e)
+
+    api.set_tray_refresh(refresh_tray_menu)
+
+    def startup_enable():
+        """启动时按用户上次的选择恢复定时记录（默认开启）；完成后同步托盘菜单文案。"""
+        try:
+            if config.SETTINGS.get("recording_enabled", True):
+                ui_api.enable_task()
             tray.title = TRAY_RUNNING if ui_api.task_is_enabled() else TRAY_STOPPED
             tray.menu = build_menu()
         except Exception as e:  # noqa: BLE001
             _logger.error("启动恢复定时任务失败: %s", e)
 
     threading.Thread(target=startup_enable, daemon=True).start()
+
+    start_enter_listener()  # 回车键快速记录（全局监听，常驻）
 
     def run_test_loop():
         """测试模式：秒级循环截屏（任务计划最小只能 1 分钟）。清除设置即停。"""
@@ -205,7 +329,8 @@ def main() -> None:
     if config.SETTINGS.get("test_interval_seconds"):
         threading.Thread(target=run_test_loop, daemon=True).start()
 
-    webview.start(debug=False)
+    # storage_path 固定 WebView2 数据目录：避免每次启动建随机临时目录（冷启动 + 磁盘残留）
+    webview.start(debug=False, storage_path=str(config.WEBVIEW_DIR))
 
 
 if __name__ == "__main__":

@@ -5,3 +5,4 @@ pywebview
 pywin32
 pystray
 pillow
+pynput

@@ -229,7 +229,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .panel-head { display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 600; margin-bottom: 14px }
 .panel-head::before { content: ""; width: 3px; height: 14px; align-self: center; border-radius: 2px; background: var(--brand); box-shadow: 0 0 8px rgba(52, 211, 153, 0.7) }
 .panel-head .hint { font-size: 12px; font-weight: 400; color: var(--faint) }
-.head-gap { margin-top: 20px }
 
 /* ===== 分类时长分布 ===== */
 .cat-list { display: flex; flex-direction: column; gap: 12px }
@@ -288,7 +287,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
   font-size: 11.5px; font-weight: 600;
 }
 .tl-todo { padding: 3px 10px; border-radius: 999px; background: rgba(251, 191, 36, 0.14); color: var(--amber); font-size: 11.5px }
-.tl-ts { font-size: 11.5px; color: var(--faint) }
 .tl-empty { padding: 46px 12px; text-align: center; color: var(--faint); font-size: 13px; line-height: 1.7 }
 
 /* ===== 日报页 ===== */
@@ -358,6 +356,105 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .settings-status dd { margin: 0; font-weight: 600 }
 .settings-status .ok { color: var(--brand) }
 .settings-status .bad { color: var(--danger) }
+
+/* ===== 日志页 ===== */
+.logs-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 62vh; overflow-y: auto;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px;
+}
+.log-line { display: flex; gap: 10px; padding: 5px 10px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); color: var(--sub); word-break: break-all }
+.log-ts { color: var(--faint); flex: none }
+.log-lv { flex: none; min-width: 44px; color: var(--brand) }
+.log-msg { flex: 1 }
+.log-err { background: rgba(248, 113, 113, 0.09); color: #fca5a5 }
+.log-err .log-lv { color: #f87171 }
+.log-warn { background: rgba(250, 204, 21, 0.07); color: #fde68a }
+.log-warn .log-lv { color: #facc15 }
+.logs-empty { color: var(--faint); padding: 14px; text-align: center }
+
+/* ===== 待办页 ===== */
+.todo-search {
+  height: 34px; width: 220px; padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.06); color: var(--ink);
+  font-size: 13px;
+}
+.todo-search:focus { outline: 2px solid var(--brand); outline-offset: 1px }
+.todo-list { display: flex; flex-direction: column; gap: 8px }
+.todo-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.todo-item:hover { background: var(--panel-strong); border-color: rgba(52, 211, 153, 0.3) }
+.todo-check { accent-color: var(--brand); width: 15px; height: 15px; flex: none; cursor: pointer }
+.todo-text { flex: 1; min-width: 0; font-size: 13.5px; color: var(--ink); word-break: break-all }
+.todo-item.done .todo-text { color: var(--faint); text-decoration: line-through }
+.todo-status-sel {
+  height: 26px; padding: 0 6px;
+  border-radius: 7px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.06); color: var(--sub);
+  font-size: 12px;
+  cursor: pointer;
+}
+.todo-ts { flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums }
+.todo-del {
+  width: 24px; height: 24px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: transparent; color: var(--faint);
+  font-size: 12px;
+}
+.todo-del:hover { background: rgba(239, 68, 68, 0.2); color: var(--danger) }
+
+/* 新建待办弹窗 */
+.modal-input {
+  width: 100%; height: 38px; padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.06); color: var(--ink);
+  font-size: 13.5px;
+}
+.modal-input:focus { outline: 2px solid var(--brand); outline-offset: 1px }
+.prio-pick { display: flex; gap: 8px; margin-top: 6px }
+.prio-opt {
+  height: 30px; padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.06); color: var(--sub);
+  font-size: 13px;
+}
+.prio-opt:hover { border-color: rgba(52, 211, 153, 0.45) }
+.prio-opt.sel { background: var(--brand-soft); border-color: rgba(52, 211, 153, 0.45); color: var(--brand); font-weight: 600 }
+
+/* ===== 数据管理 ===== */
+.btn-danger {
+  height: 34px; padding: 0 16px;
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 9px;
+  background: transparent; color: var(--danger);
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  font-size: 13px;
+  transition: background 0.2s ease;
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.16) }
+.db-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 2px }
+.db-stat {
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+.db-value { font-family: "Ogg Medium", serif; font-size: 19px; color: var(--ink); line-height: 1.2 }
+.db-label { margin-top: 4px; font-size: 11px; color: var(--faint) }
 
 /* ===== 弹窗 ===== */
 .modal-backdrop {

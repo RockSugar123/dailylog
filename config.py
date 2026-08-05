@@ -44,10 +44,13 @@ def setup_logging() -> logging.Logger:
     logger.addHandler(handler)
     return logger
 
-# 截图分析 API（阿里云百炼，视觉模型）
-DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "").strip()
-DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-ANALYZE_MODEL = "qwen3.5-omni-plus-2026-03-15"
+# 截图分析 API（NVIDIA NIM miniMax M3 视觉模型，OpenAI 兼容端点）
+ANALYZE_API_KEY = os.getenv("ANALYZE_API_KEY", "").strip()
+ANALYZE_BASE_URL = "https://integrate.api.nvidia.com/v1"
+ANALYZE_MODEL = "minimaxai/minimax-m3"
+ANALYZE_TEMPERATURE = 1
+ANALYZE_TOP_P = 0.95
+ANALYZE_MAX_TOKENS = 4096
 
 # 日报/周报总结 API（DeepSeek 官方）
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -59,6 +62,11 @@ MONITOR_INDEX = 1                # mss 监控器编号，1 = 主屏
 IDLE_ENABLED = SETTINGS.get("idle_enabled", True)   # 鼠标空闲暂停截屏（可设置页开关）
 IDLE_MINUTES = SETTINGS.get("idle_minutes", 5)      # 空闲阈值（分钟）
 IDLE_CHOICES = (1, 2, 5, 10, 15, 20, 30)
+RETENTION_CHOICES = (0, 7, 14, 30, 60, 90)  # 本地记录保留天数，0 = 永久保留
+DEDUP_ENABLED = SETTINGS.get("dedup_enabled", True)  # 跳过重复画面（md5 去重开关）
+ENTER_CAPTURE_ENABLED = SETTINGS.get("enter_capture_enabled", False)  # 回车键快速记录
+ENTER_CAPTURE_INTERVAL = SETTINGS.get("enter_capture_interval", 15)   # 回车键记录间隔（秒）
+ENTER_INTERVAL_CHOICES = (5, 15, 30, 60)  # 回车键记录间隔选项（秒）
 MAX_RETRIES = 1                  # API 失败重试次数
 
 # 目录与状态
@@ -66,7 +74,13 @@ RECORDS_DIR = BASE_DIR / "records"
 RAW_DIR = RECORDS_DIR / "raw"
 REPORTS_DIR = BASE_DIR / "reports"
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
+TODOS_FILE = RECORDS_DIR / "todos.json"
 STATE_FILE = BASE_DIR / "state.json"
+
+# WebView2 数据目录固定到用户数据区（pywebview 默认每次启动建随机临时目录且不清理，见 winforms.init_storage）
+WEBVIEW_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "dailylog" / "webview"
+
+APP_TITLE = "dailylog · 今日轨迹"  # 应用窗口标题：app.py 创建窗口、capture.py 截屏前按此隐藏自身窗口
 
 # 活动分类 → 时间线中文标签（沿用用户的分类体系）
 ACTIVITY_LABELS = {

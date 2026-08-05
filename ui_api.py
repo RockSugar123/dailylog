@@ -13,10 +13,12 @@ from pathlib import Path
 import analyze
 import config
 import summarize
+import todos
 
 TASK_NAME = "DailyLogCapture"
 INTERVAL_CHOICES = (5, 10, 15, 30, 60)
 IDLE_CHOICES = config.IDLE_CHOICES
+RETENTION_CHOICES = config.RETENTION_CHOICES
 
 
 def _write_settings(**overrides) -> None:
@@ -86,8 +88,11 @@ def task_next_run() -> str:
 def task_is_enabled() -> bool:
     """查询任务计划是否启用。
 
-    用任务计划 COM 接口（schtasks 的 XML 导出在此系统上省略 Disabled 元素，文本输出无状态列，均不可靠）。
+    优先用任务计划 COM 接口；COM 失败时回退解析 schtasks XML 的 <Enabled> 元素
+    （2026-08-02 实测本系统 XML 含该元素，与旧注释相反；元素缺失按任务计划
+    默认语义视为启用）。禁止裸返回 False —— 否则 toggle 会基于错误状态决策。
     """
+    _logger = config.setup_logging()
     own_com = _com_init()
     try:
         import win32com.client  # noqa: PLC0415
@@ -95,12 +100,19 @@ def task_is_enabled() -> bool:
         scheduler.Connect()
         task = scheduler.GetFolder("\\").GetTask(TASK_NAME)
         return bool(task.Enabled)
-    except Exception:  # noqa: BLE001
-        return False
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("查询任务启用状态 COM 失败，回退 XML: %s", e)
     finally:
         if own_com:
             import pythoncom  # noqa: PLC0415
             pythoncom.CoUninitialize()
+    try:
+        xml = _schtasks("/query", "/tn", TASK_NAME, "/xml")
+        m = re.search(r"<Enabled>(true|false)</Enabled>", xml)
+        return m.group(1) == "true" if m else True
+    except RuntimeError as e:
+        _logger.warning("XML 查询任务失败（按已停用处理）: %s", e)
+        return False  # 任务不存在/查询失败
 
 
 def apply_interval(minutes: int) -> None:
@@ -132,7 +144,14 @@ def _com_init() -> bool:
     """
     try:
         import pythoncom  # noqa: PLC0415
-        return pythoncom.CoInitialize() == 0  # S_OK
+        try:
+            return pythoncom.CoInitialize() == 0  # S_OK
+        except pythoncom.com_error as e:
+            # 线程已以 MTA 初始化（pywebview 桥线程等）时 CoInitialize(STA) 抛
+            # RPC_E_CHANGED_MODE(0x80010106)：COM 实际可用，直接继续、勿反初始化
+            if e.hresult == -2147417850:  # RPC_E_CHANGED_MODE
+                return False
+            raise
     except Exception:  # noqa: BLE001
         return False
 
@@ -172,6 +191,11 @@ def disable_task() -> None:
     _set_task_enabled(False)
 
 
+def persist_recording_choice(enabled: bool) -> None:
+    """记录用户对定时记录开/停的选择（settings.json），供启动/恢复时遵守。"""
+    _write_settings(recording_enabled=bool(enabled))
+
+
 class Api:
     """暴露给前端的方法。pywebview 桥会自动把返回值 JSON 序列化给 JS。"""
 
@@ -185,23 +209,17 @@ class Api:
 
     def get_records(self, date: str) -> list:
         """某天的全部时间线条目（按时间排序，含分类中文标签）。"""
-        path = config.RAW_DIR / f"{date}.jsonl"
-        if not path.exists():
+        try:
+            day = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
             return []
-        records = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            rec = json.loads(line)
+        records = summarize.load_records(day)
+        for rec in records:
             rec["label"] = config.ACTIVITY_LABELS.get(rec.get("activity", ""), "其他")
-            records.append(rec)
-        records.sort(key=lambda r: r.get("ts", ""))
         return records
 
     def get_records_range(self, start: str, end: str) -> list:
         """日期范围（含首尾）内的全部时间线条目，按时间升序。"""
-        from datetime import timedelta  # noqa: PLC0415
         start_d = datetime.strptime(start, "%Y-%m-%d")
         end_d = datetime.strptime(end, "%Y-%m-%d")
         records = []
@@ -249,6 +267,27 @@ class Api:
             return {"ok": False, "error": "报告不存在"}
         return {"ok": True, "name": name, "content": path.read_text(encoding="utf-8")}
 
+    # ---------- 待办 ----------
+
+    def get_todos(self) -> list:
+        """全部待办（先增量同步时间线里的待办字段）：优先级高在前，同级新在前。"""
+        todos.sync_from_records()
+        items = todos.load()["items"]
+        return sorted(sorted(items, key=lambda it: it.get("ts", ""), reverse=True),
+                      key=lambda it: todos.PRIORITY_ORDER.get(it.get("priority"), 1))
+
+    def add_todo(self, text: str, priority: str = "中") -> dict:
+        """手动新建待办。"""
+        return todos.add(text, priority)
+
+    def set_todo_status(self, todo_id: str, status: str) -> dict:
+        """切换待办状态（勾选完成 / 状态变更）。"""
+        return todos.set_status(todo_id, status)
+
+    def delete_todo(self, todo_id: str) -> dict:
+        """删除一条待办。"""
+        return todos.remove(todo_id)
+
     # ---------- 设置 ----------
 
     def get_config(self) -> dict:
@@ -263,10 +302,36 @@ class Api:
             "idle_enabled": bool(config.SETTINGS.get("idle_enabled", True)),
             "idle_minutes": config.SETTINGS.get("idle_minutes", 5),
             "idle_choices": list(config.IDLE_CHOICES),
+            "retention_days": config.SETTINGS.get("retention_days", 0),
+            "retention_choices": list(config.RETENTION_CHOICES),
+            "dedup_enabled": bool(config.SETTINGS.get("dedup_enabled", True)),
+            "enter_capture_enabled": bool(config.SETTINGS.get("enter_capture_enabled", False)),
+            "enter_capture_interval": config.SETTINGS.get("enter_capture_interval", 15),
+            "enter_interval_choices": list(config.ENTER_INTERVAL_CHOICES),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
-            "has_analyze_key": bool(config.DASHSCOPE_API_KEY),
+            "has_analyze_key": bool(config.ANALYZE_API_KEY),
             "has_summary_key": bool(config.DEEPSEEK_API_KEY),
         }
+
+    def get_logs(self, limit: int = 300) -> dict:
+        """读运行日志尾部（最新在前），供左侧日志页查看报错原因。"""
+        path = config.BASE_DIR / "dailylog.log"
+        if not path.exists():
+            return {"ok": True, "logs": []}
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+        logs = []
+        for line in lines[-limit:]:
+            parts = line.split(" ", 2)  # "2026-08-04 18:04:40 INFO 消息"
+            if len(parts) == 3 and len(parts[0]) == 10 and len(parts[1]) == 8:
+                level, _, msg = parts[2].partition(" ")
+                logs.append({"ts": f"{parts[0]} {parts[1]}", "level": level, "msg": msg})
+            else:
+                logs.append({"ts": "", "level": "", "msg": line})
+        logs.reverse()  # 最新在前
+        return {"ok": True, "logs": logs}
 
     def set_test_interval(self, seconds: int) -> dict:
         """测试用：秒级截屏间隔（配合验证用，用完在设置页改回分钟即可清除）。"""
@@ -284,12 +349,15 @@ class Api:
         return {"ok": True}
 
     def toggle_recording(self) -> dict:
-        """截屏记录总开关（标题栏/托盘共用）：启用↔停用定时记录。"""
+        """截屏记录总开关（标题栏/托盘共用）：启用↔停用定时记录，并持久化选择。"""
         if task_is_enabled():
             disable_task()
+            enabled = False
         else:
             enable_task()
-        return {"ok": True, "recording_enabled": task_is_enabled()}
+            enabled = True
+        persist_recording_choice(enabled)
+        return {"ok": True, "recording_enabled": enabled}
 
     def set_idle(self, enabled: bool, minutes: int) -> dict:
         """设置鼠标空闲暂停截屏：开关 + 阈值分钟。"""
@@ -308,6 +376,14 @@ class Api:
         config.REPORT_NAME = name
         return {"ok": True, "report_name": name}
 
+    def set_retention(self, days: int) -> dict:
+        """设置本地记录保留天数（0 = 永久保留）。"""
+        days = int(days)
+        if days not in RETENTION_CHOICES:
+            return {"ok": False, "error": f"保留天数必须是 {RETENTION_CHOICES} 之一"}
+        _write_settings(retention_days=days)
+        return {"ok": True, "retention_days": days}
+
     def set_interval(self, minutes: int) -> dict:
         try:
             apply_interval(int(minutes))
@@ -315,10 +391,154 @@ class Api:
         except (ValueError, RuntimeError) as e:
             return {"ok": False, "error": str(e)}
 
-    # ---------- 手动记录 ----------
+    def set_dedup(self, enabled: bool) -> dict:
+        """跳过重复画面开关（capture.py 的 md5 去重，默认开）。"""
+        _write_settings(dedup_enabled=bool(enabled))
+        config.DEDUP_ENABLED = bool(enabled)
+        return {"ok": True, "dedup_enabled": bool(enabled)}
 
-    def run_capture(self) -> dict:
-        """立即执行一次截屏分析（托盘"开始记录"）。"""
-        import capture
-        code = capture.main()
-        return {"ok": code == 0, "code": code}
+    def set_enter_capture(self, enabled: bool, seconds: int) -> dict:
+        """回车键快速记录：全局监听开关 + 间隔内只记录第一次（秒）。"""
+        seconds = int(seconds)
+        if seconds not in config.ENTER_INTERVAL_CHOICES:
+            return {"ok": False, "error": f"间隔必须是 {config.ENTER_INTERVAL_CHOICES} 之一"}
+        _write_settings(enter_capture_enabled=bool(enabled), enter_capture_interval=seconds)
+        config.ENTER_CAPTURE_ENABLED = bool(enabled)
+        config.ENTER_CAPTURE_INTERVAL = seconds
+        return {"ok": True, "enter_capture_enabled": bool(enabled), "enter_capture_interval": seconds}
+
+    # ---------- 数据管理 ----------
+
+    # 导出/导入备份里允许包含的设置键（API Key 在 .env，永不进备份）
+    EXPORT_SETTING_KEYS = (
+        "interval_minutes", "report_name", "idle_enabled", "idle_minutes",
+        "retention_days", "recording_enabled", "dedup_enabled",
+        "enter_capture_enabled", "enter_capture_interval",
+    )
+
+    def export_data(self, path: str) -> dict:
+        """导出 JSON 备份：时间线 jsonl + 当日 md + 报告 + 待办 + 安全设置键。"""
+        try:
+            records = {}
+            if config.RAW_DIR.exists():
+                for p in config.RAW_DIR.glob("*.jsonl"):
+                    records[p.stem] = p.read_text(encoding="utf-8", errors="replace")
+            md_files = {}
+            if config.RECORDS_DIR.exists():
+                for p in config.RECORDS_DIR.glob("*.md"):
+                    md_files[p.name] = p.read_text(encoding="utf-8", errors="replace")
+            reports = {}
+            if config.REPORTS_DIR.exists():
+                for p in config.REPORTS_DIR.glob("*.md"):
+                    reports[p.name] = p.read_text(encoding="utf-8", errors="replace")
+            backup = {
+                "exported_at": datetime.now().isoformat(timespec="seconds"),
+                "app": "dailylog",
+                "version": 1,
+                "settings": {k: config.SETTINGS.get(k) for k in self.EXPORT_SETTING_KEYS},
+                "records": records,   # 日期 → jsonl 内容
+                "md": md_files,       # 文件名 → 内容（当日 md 时间线）
+                "reports": reports,   # 文件名 → 内容
+                "todos": todos.load(),
+            }
+            Path(path).write_text(
+                json.dumps(backup, ensure_ascii=False, indent=2), encoding="utf-8",
+            )
+            return {"ok": True, "path": path}
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+
+    def import_data(self, path: str) -> dict:
+        """从备份恢复：records/md/报告/待办/设置。已存在的文件跳过（不覆盖当前数据）。"""
+        try:
+            backup = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            return {"ok": False, "error": f"备份文件读取失败: {e}"}
+        if not isinstance(backup.get("records"), dict):
+            return {"ok": False, "error": "不是有效的 dailylog 备份文件"}
+        config.RAW_DIR.mkdir(parents=True, exist_ok=True)
+        config.RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+        config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        restored = {"records": 0, "md": 0, "reports": 0}
+        for date, content in backup.get("records", {}).items():
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) and not (config.RAW_DIR / f"{date}.jsonl").exists():
+                (config.RAW_DIR / f"{date}.jsonl").write_text(content, encoding="utf-8")
+                restored["records"] += 1
+        for name, content in backup.get("md", {}).items():
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.md", name) and not (config.RECORDS_DIR / name).exists():
+                (config.RECORDS_DIR / name).write_text(content, encoding="utf-8")
+                restored["md"] += 1
+        for name, content in backup.get("reports", {}).items():
+            if name.endswith(".md") and not (config.REPORTS_DIR / name).exists():
+                (config.REPORTS_DIR / name).write_text(content, encoding="utf-8")
+                restored["reports"] += 1
+        # 待办整表恢复（备份即快照）；设置合并（只写备份里存在的安全键）
+        if isinstance(backup.get("todos"), dict) and isinstance(backup["todos"].get("items"), list):
+            todos.save(backup["todos"])
+        merged = {k: backup["settings"][k] for k in self.EXPORT_SETTING_KEYS if k in backup.get("settings", {})}
+        if merged:
+            _write_settings(**merged)
+        return {"ok": True, **restored}
+
+    def clear_data(self) -> dict:
+        """清除历史数据：records/、reports/、截图、日志、待办；保留 .env 与 settings.json。"""
+        _logger = config.setup_logging()
+        removed = {"records": 0, "reports": 0}
+        try:
+            for p in list(config.RAW_DIR.glob("*.jsonl")) + list(config.RECORDS_DIR.glob("*.md")):
+                p.unlink(missing_ok=True)
+                removed["records"] += 1
+            for p in config.REPORTS_DIR.glob("*.md"):
+                p.unlink(missing_ok=True)
+                removed["reports"] += 1
+            for p in config.BASE_DIR.glob("dailylog.log*"):
+                p.unlink(missing_ok=True)
+            config.TODOS_FILE.unlink(missing_ok=True)
+            config.STATE_FILE.unlink(missing_ok=True)
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+        _logger.info("数据管理：已清除本地数据（%d 条记录、%d 份报告、日志与待办）",
+                     removed["records"], removed["reports"])
+        return {"ok": True, **removed}
+
+    def db_stats(self) -> dict:
+        """当前本地数据统计：容量 / 时间线条数 / 报告数 / 日志条数。"""
+        total = timeline_count = 0
+        if config.RAW_DIR.exists():
+            for p in config.RAW_DIR.glob("*.jsonl"):
+                try:
+                    total += p.stat().st_size
+                    timeline_count += sum(1 for _ in p.open(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+        report_count = 0
+        if config.REPORTS_DIR.exists():
+            for p in config.REPORTS_DIR.glob("*.md"):
+                try:
+                    total += p.stat().st_size
+                    report_count += 1
+                except OSError:
+                    continue
+        if config.RECORDS_DIR.exists():
+            for p in config.RECORDS_DIR.glob("*.md"):
+                try:
+                    total += p.stat().st_size
+                except OSError:
+                    continue
+        log_count = 0
+        for p in config.BASE_DIR.glob("dailylog.log*"):
+            try:
+                total += p.stat().st_size
+                if p.name == "dailylog.log":
+                    log_count = sum(1 for _ in p.open(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+        return {
+            "size_mb": round(total / 1024 / 1024, 2),
+            "size_kb": round(total / 1024, 1),
+            "timeline_count": timeline_count,
+            "report_count": report_count,
+            "log_count": log_count,
+        }
+
+

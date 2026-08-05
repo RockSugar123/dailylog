@@ -6,7 +6,8 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('static', 'static')],
-    hiddenimports=[],
+    # pynput 键盘监听按平台动态加载后端模块，PyInstaller 无法静态发现，需显式收进
+    hiddenimports=['pynput.keyboard._win32', 'pynput._util.win32'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -19,9 +20,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='dailylog',
     debug=False,
     bootloader_ignore_signals=False,
@@ -37,3 +37,11 @@ exe = EXE(
     entitlements_file=None,
     icon=['static\\assets\\icon.ico'],
 )
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    name='dailylog',
+)
+

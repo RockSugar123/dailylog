@@ -30,7 +30,9 @@
     <aside class="sidebar">
       <nav class="side-nav">
         <a class="side-item active" data-page="timeline"><span class="side-ico">◉</span>时间线</a>
+        <a class="side-item" data-page="todos"><span class="side-ico">☑</span>待办</a>
         <a class="side-item" data-page="reports"><span class="side-ico">▤</span>日报周报</a>
+        <a class="side-item" data-page="logs"><span class="side-ico">☰</span>日志</a>
         <a class="side-item" data-page="settings"><span class="side-ico">⚙</span>设置</a>
       </nav>
       <nav class="side-nav side-secondary">
@@ -53,7 +55,7 @@
             <span class="date-split">至</span>
             <input type="date" id="range-end" aria-label="结束日期" />
             <div class="presets">
-              <button class="btn-ghost preset" data-days="0">今天</button>
+              <button class="btn-ghost preset" data-days="1">今天</button>
               <button class="btn-ghost preset" data-days="7">近7天</button>
               <button class="btn-ghost preset" data-days="30">近30天</button>
             </div>
@@ -78,6 +80,29 @@
         </div>
       </section>
 
+      <!-- ===== 待办页 ===== -->
+      <section class="page" id="page-todos" hidden>
+        <div class="page-desc">截图分析会自动提取待办，也可以手动新建；勾选即完成</div>
+
+        <div class="filter-bar">
+          <button class="btn-primary" id="todo-add">＋ 新建待办</button>
+          <div class="select-wrap" id="todo-status-wrap">
+            <button class="select-btn" id="todo-status-btn">全部状态<span class="caret">▾</span></button>
+            <div class="select-pop" id="todo-status-pop" hidden></div>
+          </div>
+          <div class="select-wrap" id="todo-priority-wrap">
+            <button class="select-btn" id="todo-priority-btn">全部优先级<span class="caret">▾</span></button>
+            <div class="select-pop" id="todo-priority-pop" hidden></div>
+          </div>
+          <input type="search" id="todo-search" class="todo-search" placeholder="搜索待办" />
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">待办列表 <span class="hint" id="todo-count"></span></div>
+          <div class="todo-list" id="todo-list"></div>
+        </div>
+      </section>
+
       <!-- ===== 日报周报页 ===== -->
       <section class="page" id="page-reports" hidden>
         <div class="page-desc">从时间线归纳成果、进展与待办，写周报不再从零开始</div>
@@ -93,14 +118,25 @@
         </div>
       </section>
 
+      <!-- ===== 日志页 ===== -->
+      <section class="page" id="page-logs" hidden>
+        <div class="page-desc">运行日志：查看记录与分析报错原因（最新在前，60 秒自动刷新）</div>
+        <div class="panel">
+          <div class="panel-head">日志 <span class="hint" id="logs-count"></span>
+            <button class="btn-ghost" id="logs-refresh" style="float:right">刷新</button>
+          </div>
+          <div class="logs-list" id="logs-list"></div>
+        </div>
+      </section>
+
       <!-- ===== 设置页 ===== -->
       <section class="page" id="page-settings" hidden>
-        <div class="page-desc">配置截屏间隔与模型通道</div>
+        <div class="page-desc">配置截屏记录、模型通道与数据管理</div>
 
         <div class="panel">
-          <div class="panel-head">记录配置</div>
+          <div class="panel-head">截图与记录</div>
           <div class="settings-row">
-            <label for="set-interval">截屏间隔</label>
+            <label for="set-interval">截图间隔</label>
             <div class="select-wrap" id="interval-wrap">
               <button class="select-btn" id="interval-btn">每 10 分钟<span class="caret">▾</span></button>
               <div class="select-pop" id="interval-pop" hidden></div>
@@ -111,7 +147,7 @@
             <input type="text" id="set-name" maxlength="20" placeholder="留空则不输出" />
           </div>
           <div class="settings-row">
-            <label>空闲暂停</label>
+            <label>自动暂停</label>
             <label class="switch-label"><input type="checkbox" id="idle-enabled" checked /> 鼠标静止时暂停截屏</label>
             <div class="select-wrap" id="idle-wrap">
               <button class="select-btn" id="idle-btn">5 分钟<span class="caret">▾</span></button>
@@ -119,10 +155,70 @@
             </div>
           </div>
           <div class="settings-row">
+            <label for="retention-btn">截图保留</label>
+            <div class="select-wrap" id="retention-wrap">
+              <button class="select-btn" id="retention-btn">永久保留<span class="caret">▾</span></button>
+              <div class="select-pop" id="retention-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label>跳过重复画面</label>
+            <label class="switch-label"><input type="checkbox" id="dedup-enabled" checked /> 画面与上次几乎相同时跳过识别</label>
+          </div>
+          <div class="settings-row">
+            <label>回车键快速记录</label>
+            <label class="switch-label"><input type="checkbox" id="enter-enabled" /> 全局监听回车键，按下即截屏识别保存</label>
+            <div class="select-wrap" id="enter-wrap">
+              <button class="select-btn" id="enter-btn">15 秒<span class="caret">▾</span></button>
+              <div class="select-pop" id="enter-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
             <span class="set-spacer"></span>
             <button class="btn-primary" id="set-save">保存</button>
           </div>
-          <div class="panel-head head-gap">当前状态</div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint">5 秒后截取当前屏幕并记录</span>
+            <button class="btn-primary" id="manual-capture">识别当前屏幕</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">数据管理</div>
+          <div class="settings-row">
+            <label>导出数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">导出为 JSON 备份（记录、报告与待办）</span>
+            <button class="btn-primary" id="export-data">↓ 导出</button>
+          </div>
+          <div class="settings-row">
+            <label>导入数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">从 JSON 备份恢复本地数据</span>
+            <button class="btn-primary" id="import-data">↑ 导入</button>
+          </div>
+          <div class="settings-row">
+            <label>清除历史数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">删除本地数据和日志，保留 API Key 配置</span>
+            <button class="btn-danger" id="clear-data">🗑 删除</button>
+          </div>
+          <div class="settings-row">
+            <label>当前本地数据库文件大小</label>
+            <span class="set-spacer"></span>
+            <span class="hint">包含数据库文件占用、时间线、报告和本地日志统计</span>
+          </div>
+          <div class="db-stats" id="db-stats">
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">容量</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">时间线</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">报告</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">其他日志</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">当前状态</div>
           <dl class="settings-status" id="settings-status"></dl>
         </div>
       </section>

@@ -5,9 +5,10 @@
 import ctypes
 import hashlib
 import json
+import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import mss
 import mss.tools
@@ -38,6 +39,52 @@ def last_input_idle_seconds() -> float:
     return (ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000.0
 
 
+def _hide_app_windows() -> list:
+    """截屏前隐藏 dailylog 应用窗口，返回 [(句柄, 是否最小化)] 供 _show_app_windows 恢复。
+
+    窗口无法从屏幕截图中排除，只能截屏瞬间隐藏自身窗口（SW_HIDE），截图保存后立即恢复。
+    只隐藏"当前可见"的窗口——用户主动最小化到托盘的窗口不会被碰；
+    记录隐藏前是否最小化，恢复时保持原状态且不激活（不抢焦点、不弹回前台）。
+    """
+    user32 = ctypes.windll.user32
+    # 64 位句柄：不声明 argtypes 时 ctypes 默认按 c_int 截断，ShowWindow 会失败（经典坑）
+    user32.EnumWindows.restype = ctypes.c_bool
+    user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+    user32.IsWindowVisible.restype = ctypes.c_bool
+    user32.IsIconic.argtypes = [ctypes.c_void_p]
+    user32.IsIconic.restype = ctypes.c_bool
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    found = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(hwnd, _):
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if config.APP_TITLE in buf.value and user32.IsWindowVisible(hwnd):
+            found.append((hwnd, user32.IsIconic(hwnd)))  # 只隐藏可见窗口（托盘化的窗口不碰）
+        return True
+
+    user32.EnumWindows(_cb, 0)
+    for hwnd, _ in found:
+        user32.ShowWindow(hwnd, 0)  # SW_HIDE
+    if found:
+        time.sleep(0.3)  # 等窗口真正从画面消失再截屏
+    return found
+
+
+def _show_app_windows(hwnds: list) -> None:
+    """恢复先前由 _hide_app_windows 隐藏的窗口（只操作传入句柄，不碰托盘窗口）。
+
+    不激活窗口（SW_SHOWNOACTIVATE=4）；隐藏前已最小化的窗口保持最小化
+    （SW_SHOWMINNOACTIVE=7），避免截屏后窗口被 SW_SHOW 激活弹回前台抢焦点。
+    """
+    user32 = ctypes.windll.user32
+    user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    for hwnd, was_minimized in hwnds:
+        user32.ShowWindow(hwnd, 7 if was_minimized else 4)
+
+
 def is_black_screen(raw: bytes) -> bool:
     """每 400 像素采样 1 个，>99% 亮度接近 0 判定为黑屏/睡眠。"""
     dark = total = 0
@@ -58,6 +105,71 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     config.STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+
+
+def _report_date(name: str):
+    """报告文件名 → (开始日期, 结束日期)；解析失败返回 None（不删，保守）。
+
+    日报当天开始当天结束；周报按周一~周日（保留判断用结束日，避免
+    覆盖到保留窗口尾部的周报被过早删掉）。
+    """
+    m = re.match(r"日报-(\d{4}-\d{2}-\d{2})\.md", name)
+    if m:
+        day = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        return day, day
+    m = re.match(r"周报-(\d{4})-W(\d{1,2})\.md", name)
+    if m:
+        monday = datetime.fromisocalendar(int(m.group(1)), int(m.group(2)), 1).date()
+        return monday, monday + timedelta(days=6)
+    return None
+
+
+def cleanup_expired() -> None:
+    """按设置保留天数清理过期记录与报告（0 = 永久保留，不清理）。
+
+    每天最多执行一次，节流标记用独立文件 .last_cleanup（存日期字符串）——
+    不能写进 state.json：capture 的 save_state 是整体覆盖，并存字段会丢。
+    """
+    days = config.SETTINGS.get("retention_days", 0)
+    if not days:
+        return
+    marker = config.BASE_DIR / ".last_cleanup"
+    today = datetime.now().date()
+    try:
+        if marker.exists() and marker.read_text(encoding="utf-8").strip() == today.isoformat():
+            return
+    except OSError as e:
+        _logger.warning("清理节流标记读取失败（本次继续执行清理）: %s", e)
+    cutoff = today - timedelta(days=days)
+    removed = 0
+    for p in config.RAW_DIR.glob("*.jsonl"):
+        try:
+            day = datetime.strptime(p.stem, "%Y-%m-%d").date()
+        except ValueError:
+            continue  # 文件名不是日期（垃圾文件），跳过
+        if day < cutoff:
+            p.unlink(missing_ok=True)
+            removed += 1
+    # 只有 .md 没有 .jsonl 的日子也要清理（如 jsonl 已删/手动编辑过的时间线）
+    for p in config.RECORDS_DIR.glob("*.md"):
+        try:
+            day = datetime.strptime(p.stem, "%Y-%m-%d").date()
+        except ValueError:
+            continue  # 文件名不是日期（垃圾文件），跳过
+        if day < cutoff:
+            p.unlink(missing_ok=True)
+            removed += 1
+    for p in config.REPORTS_DIR.glob("*.md"):
+        span = _report_date(p.name)
+        if span and span[1] < cutoff:  # 报告覆盖期整体早于窗口 → 删
+            p.unlink(missing_ok=True)
+            removed += 1
+    try:
+        marker.write_text(today.isoformat(), encoding="utf-8")
+    except OSError as e:
+        _logger.warning("清理节流标记写入失败（下次截屏会重试）: %s", e)
+    if removed:
+        log(f"数据清理：已删除 {removed} 个过期文件（保留 {days} 天）")
 
 
 def append_record(ts: datetime, record: dict) -> None:
@@ -87,12 +199,14 @@ def append_record(ts: datetime, record: dict) -> None:
         f.write(json.dumps({"ts": ts.isoformat(timespec="seconds"), **record}, ensure_ascii=False) + "\n")
 
 
-def main() -> int:
-    if not config.DASHSCOPE_API_KEY:
-        log("未配置 DASHSCOPE_API_KEY，请在 .env 中填写后重试")
+def main(force: bool = False) -> int:
+    """截屏记录主流程；force=True 时跳过空闲检测与画面去重（手动截屏）。"""
+    cleanup_expired()  # 顺带按保留天数清理过期数据（每天一次）
+    if not config.ANALYZE_API_KEY:
+        log("未配置 ANALYZE_API_KEY，请在 .env 中填写后重试")
         return 1
 
-    if config.IDLE_ENABLED and last_input_idle_seconds() > config.IDLE_MINUTES * 60:
+    if not force and config.IDLE_ENABLED and last_input_idle_seconds() > config.IDLE_MINUTES * 60:
         log(f"鼠标空闲超过 {config.IDLE_MINUTES} 分钟，跳过本次")
         return 0
 
@@ -102,21 +216,26 @@ def main() -> int:
     try:
         with mss.MSS() as sct:
             monitor = sct.monitors[config.MONITOR_INDEX]
-            raw = sct.grab(monitor)
+            hidden = _hide_app_windows()  # 隐藏应用自身窗口，避免其界面进入截图
+            try:
+                raw = sct.grab(monitor)
 
-            if is_black_screen(raw.raw):
-                log("屏幕为黑屏/睡眠，跳过本次")
-                return 0
+                if is_black_screen(raw.raw):
+                    log("屏幕为黑屏/睡眠，跳过本次")
+                    return 0
 
-            digest = hashlib.md5(raw.raw).hexdigest()
-            state = load_state()
-            # 上次分析失败（last_failed）时放行：即使画面未变也重试，避免去重把重试挡掉
-            if digest == state.get("last_hash") and not state.get("last_failed"):
-                log("画面无变化，跳过本次")
-                return 0
+                digest = hashlib.md5(raw.raw).hexdigest()
+                state = load_state()
+                # 上次分析失败（last_failed）时放行：即使画面未变也重试，避免去重把重试挡掉
+                # dedup_enabled=False（设置页"跳过重复画面"关闭）时不去重，每次都识别
+                if not force and config.DEDUP_ENABLED and digest == state.get("last_hash") and not state.get("last_failed"):
+                    log("画面无变化，跳过本次")
+                    return 0
 
-            png_path = config.SCREENSHOTS_DIR / f"{ts:%Y%m%d_%H%M%S}.png"
-            mss.tools.to_png(raw.rgb, raw.size, output=str(png_path))
+                png_path = config.SCREENSHOTS_DIR / f"{ts:%Y%m%d_%H%M%S}.png"
+                mss.tools.to_png(raw.rgb, raw.size, output=str(png_path))
+            finally:
+                _show_app_windows(hidden)  # 截图已保存，立即恢复被隐藏的窗口
     except Exception as e:
         log(f"截屏失败: {e}")
         if png_path and png_path.exists():

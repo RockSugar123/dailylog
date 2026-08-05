@@ -10,9 +10,8 @@ import json
 import sys
 from datetime import datetime, timedelta
 
-import requests
-
 import config
+import llm
 
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -206,30 +205,15 @@ def build_input_text(days: list) -> str:
     return "\n".join(lines)
 
 
-# 共享会话：trust_env=False 彻底忽略环境/系统代理（用户代理工具关闭时 env 代理会导致全部调用失败）
-_SESSION = requests.Session()
-_SESSION.trust_env = False
-
-
 def call_messages(messages: list, max_tokens: int = None) -> str:
     """调 DeepSeek 官方 API，返回模型回复的 content。"""
-    body = {
-        "model": config.SUMMARY_MODEL,
-        "messages": messages,
-        "temperature": 0.3,
-    }
+    kwargs = {"temperature": 0.3}
     if max_tokens:
-        body["max_tokens"] = max_tokens
-    resp = _SESSION.post(
-        f"{config.DEEPSEEK_BASE_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
-        json=body,
-        timeout=180,
+        kwargs["max_tokens"] = max_tokens
+    return llm.call_chat(
+        config.DEEPSEEK_BASE_URL, config.DEEPSEEK_API_KEY, config.SUMMARY_MODEL,
+        messages, label="DeepSeek", **kwargs,
     )
-    if resp.status_code != 200:
-        # 带响应体抛出，否则日志里只有 "400 Bad Request" 无法定位
-        raise RuntimeError(f"DeepSeek API HTTP {resp.status_code}: {resp.text[:300]}")
-    return resp.json()["choices"][0]["message"]["content"]
 
 
 def generate_report(day: str = None, week: str = None) -> tuple:
