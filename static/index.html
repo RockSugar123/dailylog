@@ -30,6 +30,7 @@
     <aside class="sidebar">
       <nav class="side-nav">
         <a class="side-item active" data-page="timeline"><span class="side-ico">◉</span>时间线</a>
+        <a class="side-item" data-page="usage"><span class="side-ico">◔</span>应用时长</a>
         <a class="side-item" data-page="todos"><span class="side-ico">☑</span>待办</a>
         <a class="side-item" data-page="reports"><span class="side-ico">▤</span>日报周报</a>
         <a class="side-item" data-page="logs"><span class="side-ico">☰</span>日志</a>
@@ -77,6 +78,57 @@
         <div class="panel">
           <div class="panel-head">活动时间线 <span class="hint" id="tl-count"></span></div>
           <div class="timeline" id="timeline"></div>
+        </div>
+      </section>
+
+      <!-- ===== 应用时长页 ===== -->
+      <section class="page" id="page-usage" hidden>
+        <div class="page-desc">统计各应用前台使用时长（每 2 分钟采样估算，空闲时段不计入，仅记录应用名）</div>
+
+        <div class="filter-bar">
+          <div class="date-range">
+            <div class="scope-group">
+              <button class="btn-ghost scope-btn" data-scope="day">日</button>
+              <button class="btn-ghost scope-btn" data-scope="week">周</button>
+              <button class="btn-ghost scope-btn" data-scope="month">月</button>
+            </div>
+            <input type="date" id="usage-date" aria-label="统计日期" />
+            <button class="btn-ghost preset" id="usage-today">今天</button>
+          </div>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-value" id="usage-total">–</div><div class="stat-label">总使用时长</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-apps">–</div><div class="stat-label">应用数</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-top-app">–</div><div class="stat-label">最常用应用</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-top-hour">–</div><div class="stat-label">最活跃时段</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-days">–</div><div class="stat-label">统计天数</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">应用时长分布 <span class="hint">按采样次数估算，粒度 2 分钟</span>
+            <span class="set-spacer"></span>
+            <div class="chart-bar">
+              <button class="btn-ghost chart-btn active" data-chart="bar">柱状图</button>
+              <button class="btn-ghost chart-btn" data-chart="pie">饼图</button>
+            </div>
+          </div>
+          <div id="chart-area"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">详细列表 <span class="hint">Top 20</span></div>
+          <table class="usage-table">
+            <thead><tr>
+              <th>应用名称</th><th>使用时长</th><th>占比</th><th>会话次数</th><th>平均会话</th><th>最长连续</th><th>首次使用</th><th>最后使用</th>
+            </tr></thead>
+            <tbody id="usage-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">时段分布 <span class="hint" id="usage-bucket-label">按小时统计使用强度</span></div>
+          <div class="cat-list" id="usage-buckets"></div>
         </div>
       </section>
 
@@ -172,6 +224,10 @@
               <button class="select-btn" id="enter-btn">15 秒<span class="caret">▾</span></button>
               <div class="select-pop" id="enter-pop" hidden></div>
             </div>
+          </div>
+          <div class="settings-row">
+            <label>应用时长统计</label>
+            <label class="switch-label"><input type="checkbox" id="usage-enabled" checked /> 每 2 分钟采样前台应用，统计各应用使用时长</label>
           </div>
           <div class="settings-row">
             <span class="set-spacer"></span>

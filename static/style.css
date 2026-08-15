@@ -182,6 +182,7 @@ input[type="date"] {
 }
 input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cursor: pointer }
 .presets { display: flex; gap: 8px; margin-left: 4px }
+.scope-group { display: flex; gap: 6px; margin-right: 6px }
 
 .btn-ghost {
   height: 32px; padding: 0 14px;
@@ -193,6 +194,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
   transition: background 0.2s ease;
 }
 .btn-ghost:hover { background: var(--panel-strong) }
+.scope-btn.active, .chart-btn.active { background: var(--brand); border-color: var(--brand); color: #04251a; font-weight: 700 }
 .btn-primary {
   height: 36px; padding: 0 20px;
   display: inline-flex; align-items: center; gap: 8px;
@@ -206,7 +208,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .switch-label input { accent-color: var(--brand); width: 15px; height: 15px }
 
 /* ===== 数据概览（Ogg 数字） ===== */
-.stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px }
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin-bottom: 16px }
 .stat-card {
   padding: 18px 20px;
   border-radius: 14px;
@@ -237,6 +239,39 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .cat-bar { flex: 1; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); overflow: hidden }
 .cat-fill { height: 100%; border-radius: 999px; min-width: 2px; transition: width 0.5s ease; box-shadow: 0 0 8px rgba(52, 211, 153, 0.35) }
 .cat-value { width: 52px; flex: none; text-align: right; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums }
+
+/* 应用时长图表：横向条形（柱状图）+ 实心饼图 + 右侧图例（模仿参考图的极简管理后台风格） */
+.chart-bar { display: flex; gap: 4px }
+.chart-bar .btn-ghost { height: 28px; padding: 0 12px; font-size: 12px }
+.hbar-list { display: flex; flex-direction: column; gap: 9px; padding: 4px 0 }
+.hbar-row { display: flex; align-items: center; gap: 12px }
+.hbar-label { width: 150px; flex: none; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.hbar-track { flex: 1; height: 20px; background: rgba(255, 255, 255, 0.06); border-radius: 6px; overflow: hidden }
+.hbar-fill { height: 100%; border-radius: 6px; background: #4cc49a; min-width: 3px; transition: width 0.5s ease }
+.hbar-value { width: 100px; flex: none; text-align: right; font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums }
+
+.pie-layout { display: flex; align-items: center; justify-content: center; gap: 48px; padding: 16px 10px 24px }
+.pie { width: 280px; height: 280px; flex: none; filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.35)) }
+.pie path { transition: filter 0.2s ease }
+.pie path:hover { filter: brightness(1.22) }
+.pie-legend { display: flex; flex-direction: column; gap: 9px; min-width: 230px }
+.pie-legend-item { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink) }
+.pie-swatch { width: 12px; height: 12px; border-radius: 3px; flex: none }
+.pie-legend-name { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.pie-legend-val { margin-left: auto; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums }
+
+/* 详细列表表格 */
+.usage-table { width: 100%; border-collapse: collapse; font-size: 13px }
+.usage-table th {
+  text-align: right; font-weight: 400; font-size: 12px; color: var(--faint);
+  padding: 8px 10px; border-bottom: 1px solid var(--panel-border);
+}
+.usage-table th:first-child, .usage-table td:first-child { text-align: left }
+.usage-table td {
+  text-align: right; padding: 9px 10px; border-bottom: 1px solid var(--panel-border);
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.usage-table .t-app { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 
 /* ===== 时间线（签名元素：发光轨迹） ===== */
 .timeline { position: relative; padding-left: 92px }

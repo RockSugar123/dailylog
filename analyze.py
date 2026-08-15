@@ -86,15 +86,27 @@ def normalize(result: dict) -> dict:
     return result
 
 
-def call_analyze(image_url: str) -> dict:
-    """调 NVIDIA NIM 视觉模型分析截图，返回规范化 dict；失败抛异常。"""
+def call_analyze(image_url: str, existing_todos: list = None) -> dict:
+    """调 NVIDIA NIM 视觉模型分析截图，返回规范化 dict；失败抛异常。
+
+    existing_todos：当日已提取的待办列表，随请求带给模型做去重，
+    避免同一件事被反复生成待办（碎片化）。
+    """
+    prompt = ANALYZE_PROMPT
+    if existing_todos:
+        prompt += (
+            "\n\n【今日已记录的待办】\n"
+            + "\n".join(f"- {t}" for t in existing_todos)
+            + "\n以上待办已存在。若当前屏幕内容与其中某条重复、或只是进展描述，"
+              "todo 字段输出空字符串，不要重复生成。"
+        )
     content = llm.call_chat(
         config.ANALYZE_BASE_URL, config.ANALYZE_API_KEY, config.ANALYZE_MODEL,
         [{
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": ANALYZE_PROMPT},
+                {"type": "text", "text": prompt},
             ],
         }],
         label="截图分析",

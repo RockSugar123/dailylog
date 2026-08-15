@@ -77,6 +77,11 @@ SCREENSHOTS_DIR = BASE_DIR / "screenshots"
 TODOS_FILE = RECORDS_DIR / "todos.json"
 STATE_FILE = BASE_DIR / "state.json"
 
+# 应用使用时长统计（前台窗口采样，任务计划 DailyLogUsage 每 2 分钟驱动一次）
+USAGE_DIR = RECORDS_DIR / "usage"
+USAGE_INTERVAL_MINUTES = 2  # 采样间隔（分钟），时长按 采样次数 × 间隔 估算
+USAGE_ENABLED = SETTINGS.get("usage_enabled", True)  # 设置页可开关
+
 # WebView2 数据目录固定到用户数据区（pywebview 默认每次启动建随机临时目录且不清理，见 winforms.init_storage）
 WEBVIEW_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "dailylog" / "webview"
 

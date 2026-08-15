@@ -166,7 +166,7 @@ document.getElementById("win-close").addEventListener("click", () => apiCall("cl
 
 /* ===================== 页面切换 ===================== */
 
-const PAGES = { timeline: "page-timeline", todos: "page-todos", reports: "page-reports", logs: "page-logs", settings: "page-settings" };
+const PAGES = { timeline: "page-timeline", usage: "page-usage", todos: "page-todos", reports: "page-reports", logs: "page-logs", settings: "page-settings" };
 
 document.querySelectorAll(".side-item[data-page]").forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.page));
@@ -174,6 +174,7 @@ document.querySelectorAll(".side-item[data-page]").forEach((item) => {
 function switchPage(name) {
   document.querySelectorAll(".side-item[data-page]").forEach((i) => i.classList.toggle("active", i.dataset.page === name));
   Object.entries(PAGES).forEach(([key, id]) => { document.getElementById(id).hidden = key !== name; });
+  if (name === "usage") loadUsage();
   if (name === "todos") loadTodos();
   if (name === "reports") loadReports();
   if (name === "logs") loadLogs();
@@ -342,6 +343,183 @@ function openRecordModal(rec) {
   );
 }
 
+/* ===================== 应用时长页 ===================== */
+
+let usageScope = "day";
+let usageDate = todayStr();
+let usageChart = "bar";
+const USAGE_COLORS = ["#4cc49a", "#6e9eea", "#f5b94c", "#e07bd0", "#5ad1e0", "#ef6f6f", "#8b7cf5", "#7dd08a"];
+
+/* 进程名 → 中文名（展示层映射；未知进程直接显示进程名） */
+const APP_NAMES = {
+  /* 桌面应用（2026-08-05 采集） */
+  "cc-switch.exe": "CC Switch", "dailylog.exe": "dailylog", "kook.exe": "KOOK",
+  "oopz-runner.exe": "Oopz", "plain craft launcher 2.exe": "PCL2 启动器",
+  "trae cn.exe": "Trae CN", "utools.exe": "uTools", "ksolaunch.exe": "WPS Office",
+  "xiadan.exe": "委托交易", "微信开发者工具.exe": "微信开发者工具",
+  "douyin.exe": "抖音", "baidunetdisk.exe": "百度网盘", "feishu.exe": "飞书",
+  "5eclient.exe": "5E对战平台", "another redis desktop manager.exe": "Redis 管理器",
+  "apifox.exe": "Apifox", "clash-verge.exe": "Clash Verge",
+  "claude code haha.exe": "Claude Code", "claude.exe": "Claude Code",
+  "nvidia app.exe": "NVIDIA 应用", "obs64.exe": "OBS 录屏", "qq.exe": "QQ",
+  "qqmusic.exe": "QQ音乐", "sakuralauncher.exe": "SakuraFrp 启动器",
+  "steam.exe": "Steam", "vmware.exe": "VMware", "workbuddy.exe": "WorkBuddy",
+  "zhuiyun.exe": "Zhuiyun", "happ.exe": "同花顺远航版", "哔哩哔哩.exe": "哔哩哔哩",
+  "quark_cloud_drive.exe": "夸克网盘", "完美世界竞技平台.exe": "完美世界竞技平台",
+  "小黑日报助手.exe": "小黑日报助手", "weixin.exe": "微信", "wechat.exe": "微信",
+  "aclos-launcher.exe": "无畏契约", "cloudmusic.exe": "网易云音乐",
+  "wemeetapp.exe": "腾讯会议", "qqlive.exe": "腾讯视频",
+  /* 通用软件 */
+  "chrome.exe": "谷歌浏览器", "msedge.exe": "Edge 浏览器", "firefox.exe": "火狐浏览器",
+  "code.exe": "代码编辑器", "idea64.exe": "IntelliJ IDEA", "pycharm64.exe": "PyCharm",
+  "explorer.exe": "文件资源管理器", "word.exe": "Word 文档", "excel.exe": "Excel 表格",
+  "powerpoint.exe": "演示文稿", "wps.exe": "WPS 办公", "dingtalk.exe": "钉钉",
+  "notion.exe": "Notion 笔记", "obsidian.exe": "Obsidian 笔记", "typora.exe": "Typora 笔记",
+  "postman.exe": "Postman", "docker desktop.exe": "Docker",
+  "wezterm.exe": "终端", "windows terminal.exe": "终端",
+  "cs2.exe": "反恐精英2", "wallpaper32.exe": "壁纸引擎",
+};
+function appName(app) { return APP_NAMES[app] || app; }
+
+/* 饼图扇区 SVG path：从圆心到弧（hover 可高亮，无描边） */
+function pieSlice(cx, cy, r, a0, a1, color, title) {
+  const rad = (a) => (a * Math.PI) / 180;
+  const x0 = cx + r * Math.cos(rad(a0)), y0 = cy + r * Math.sin(rad(a0));
+  const x1 = cx + r * Math.cos(rad(a1)), y1 = cy + r * Math.sin(rad(a1));
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large} 1 ${x1},${y1} Z" fill="${color}"><title>${escapeHtml(title)}</title></path>`;
+}
+
+/* 柱状图 = 横向条形（应用名 | 条形按最大值比例 | 数值）；饼图 = SVG 实心饼 + 右侧图例 */
+function renderUsageChart(apps) {
+  const area = document.getElementById("chart-area");
+  if (usageChart === "bar") {
+    const max = Math.max(...apps.map((a) => a.minutes), 1);
+    area.innerHTML = `<div class="hbar-list">` + apps.map((a) => `
+      <div class="hbar-row">
+        <span class="hbar-label" title="${escapeHtml(a.app)}">${escapeHtml(appName(a.app))}</span>
+        <div class="hbar-track"><div class="hbar-fill" style="width:${(a.minutes / max * 100).toFixed(1)}%"></div></div>
+        <span class="hbar-value">${fmtMin(a.minutes)} · ${a.pct}%</span>
+      </div>`).join("") + `</div>`;
+  } else {
+    let acc = 0;
+    const slices = apps.map((a, i) => {
+      const a0 = acc * 3.6, a1 = (acc + a.pct) * 3.6;
+      acc += a.pct;
+      return pieSlice(110, 110, 96, a0, a1, USAGE_COLORS[i % USAGE_COLORS.length],
+        `${appName(a.app)} ${fmtMin(a.minutes)} · ${a.pct}%`);
+    });
+    area.innerHTML = `
+      <div class="pie-layout">
+        <svg class="pie" viewBox="0 0 220 220">${slices.join("")}</svg>
+        <div class="pie-legend">` + apps.map((a, i) => `
+          <div class="pie-legend-item">
+            <span class="pie-swatch" style="background:${USAGE_COLORS[i % USAGE_COLORS.length]}"></span>
+            <span class="pie-legend-name" title="${escapeHtml(a.app)}">${escapeHtml(appName(a.app))}</span>
+            <span class="pie-legend-val">${fmtMin(a.minutes)} · ${a.pct}%</span>
+          </div>`).join("") + `</div>
+      </div>`;
+  }
+}
+
+/* 详细列表表格（会话次数/平均会话/最长连续/首次/最后使用） */
+function renderUsageTable(apps) {
+  const tb = document.getElementById("usage-tbody");
+  if (!apps.length) { tb.innerHTML = ""; return; }
+  const fmtT = (ts) => ts ? (usageScope === "day" ? ts.slice(11, 16) : ts.slice(5, 10)) : "–";
+  tb.innerHTML = apps.map((a) => `
+    <tr>
+      <td class="t-app" title="${escapeHtml(a.app)}">${escapeHtml(appName(a.app))}</td>
+      <td>${fmtMin(a.minutes)}</td>
+      <td>${a.pct}%</td>
+      <td>${a.sessions}</td>
+      <td>${fmtMin(a.avg)}</td>
+      <td>${fmtMin(a.streak)}</td>
+      <td>${fmtT(a.first)}</td>
+      <td>${fmtT(a.last)}</td>
+    </tr>`).join("");
+}
+
+function fmtMin(min) {
+  if (min >= 60) {
+    const h = Math.floor(min / 60), m = min % 60;
+    return m ? `${h}h${m}m` : `${h}h`;
+  }
+  return `${min}m`;
+}
+
+function renderUsageBuckets(buckets, totalMin) {
+  const box = document.getElementById("usage-buckets");
+  if (!buckets.length) { box.innerHTML = ""; return; }
+  const max = Math.max(...buckets.map((b) => b.minutes), 1);
+  box.innerHTML = buckets.map((b) => `
+    <div class="cat-item">
+      <span class="cat-label">${escapeHtml(b.label)}</span>
+      <div class="cat-bar"><div class="cat-fill" style="width:${(b.minutes / max * 100).toFixed(1)}%;background:var(--brand)"></div></div>
+      <span class="cat-value">${fmtMin(b.minutes)}</span>
+    </div>`).join("");
+}
+
+async function loadUsage() {
+  document.getElementById("usage-date").value = usageDate;
+  const r = await apiCall("get_usage_stats", usageScope, usageDate);
+  const total = document.getElementById("usage-total");
+  const days = document.getElementById("usage-days");
+  const apps = document.getElementById("usage-apps");
+  const topApp = document.getElementById("usage-top-app");
+  const topHour = document.getElementById("usage-top-hour");
+  const top20 = r && r.ok ? r.apps.slice(0, 20) : [];
+  if (!r || !r.ok) {
+    document.getElementById("chart-area").innerHTML = `<div class="tl-empty">${escapeHtml(r ? r.error : "未连接到后端")}</div>`;
+    renderUsageTable([]);
+    total.textContent = "–"; days.textContent = "–"; apps.textContent = "–";
+    topApp.textContent = "–"; topHour.textContent = "–";
+    return;
+  }
+  total.textContent = fmtMin(r.total_min);
+  days.textContent = `${r.days} 天`;
+  apps.textContent = r.apps.length;
+  if (!r.apps.length) {
+    document.getElementById("chart-area").innerHTML = "";
+    document.getElementById("usage-buckets").innerHTML = "";
+    renderUsageTable([]);
+    topApp.textContent = "–"; topHour.textContent = "–";
+    return;
+  }
+  topApp.textContent = appName(r.apps[0].app);
+  const peak = r.buckets.reduce((a, b) => (b.minutes > a.minutes ? b : a), r.buckets[0]);
+  topHour.textContent = usageScope === "day" ? peak.label
+    : (peak.label || "").slice(5).replace("-", "-");
+  document.getElementById("usage-bucket-label").textContent =
+    usageScope === "day" ? "按小时统计使用强度" : "按天统计使用强度";
+  renderUsageChart(top20);
+  renderUsageTable(top20);
+  renderUsageBuckets(r.buckets, r.total_min);
+}
+
+document.querySelectorAll(".scope-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    usageScope = btn.dataset.scope;
+    document.querySelectorAll(".scope-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    loadUsage();
+  });
+});
+document.getElementById("usage-date").addEventListener("change", (e) => {
+  if (e.target.value) { usageDate = e.target.value; loadUsage(); }
+});
+document.getElementById("usage-today").addEventListener("click", () => {
+  usageDate = todayStr();
+  document.getElementById("usage-date").value = usageDate;
+  loadUsage();
+});
+document.querySelectorAll(".chart-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    usageChart = btn.dataset.chart;
+    document.querySelectorAll(".chart-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    loadUsage();
+  });
+});
+
 /* ===================== 日报周报页 ===================== */
 
 async function generateReport(kind) {
@@ -384,6 +562,7 @@ let currentRetention = 0;
 let dedupEnabled = true;
 let enterEnabled = false;
 let currentEnterInterval = 15;
+let usageEnabled = true;
 
 function statusHtml(cfg) {
   const next = cfg.recording_enabled
@@ -441,6 +620,8 @@ async function loadSettings() {
   document.getElementById("enter-enabled").checked = enterEnabled;
   document.getElementById("enter-btn").disabled = !enterEnabled;
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
+  usageEnabled = cfg.usage_enabled !== false;
+  document.getElementById("usage-enabled").checked = usageEnabled;
   updateStatus(cfg);
   loadDbStats();
 }
@@ -460,6 +641,7 @@ async function refreshStatus() {
   else if (!wantFast && isFast) { scheduleRefresh(60000); refreshTimer._fast = false; }
   updateStatus(cfg);
   if (!document.getElementById("page-logs").hidden) loadLogs();  // 日志页可见时跟随刷新
+  if (!document.getElementById("page-usage").hidden) loadUsage();  // 应用时长页可见时跟随刷新
 }
 scheduleRefresh(60000);
 
@@ -522,6 +704,9 @@ document.getElementById("enter-enabled").addEventListener("change", (e) => {
   enterEnabled = e.target.checked;
   document.getElementById("enter-btn").disabled = !enterEnabled;
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
+});
+document.getElementById("usage-enabled").addEventListener("change", (e) => {
+  usageEnabled = e.target.checked;
 });
 
 /* ===================== 待办页 ===================== */
@@ -676,10 +861,11 @@ document.getElementById("set-save").addEventListener("click", async () => {
   const rr = await apiCall("set_retention", currentRetention);
   const rdu = await apiCall("set_dedup", dedupEnabled);
   const re = await apiCall("set_enter_capture", enterEnabled, currentEnterInterval);
-  const results = [ri, rn, rd, rr, rdu, re];
+  const ru = await apiCall("set_usage_enabled", usageEnabled);
+  const results = [ri, rn, rd, rr, rdu, re, ru];
   const firstErr = results.find((r) => r && !r.ok);
   if (results.every((r) => r && r.ok)) {
-    toast(`已保存：间隔每 ${ri.interval_minutes} 分钟，空闲${idleEnabled ? currentIdleMin + " 分钟暂停" : "暂停关闭"}，记录${currentRetention ? "保留 " + currentRetention + " 天" : "永久保留"}，去重${dedupEnabled ? "开" : "关"}，回车${enterEnabled ? "开" : "关"}${name ? "，汇报人 " + name : ""}`);
+    toast(`已保存：间隔每 ${ri.interval_minutes} 分钟，空闲${idleEnabled ? currentIdleMin + " 分钟暂停" : "暂停关闭"}，记录${currentRetention ? "保留 " + currentRetention + " 天" : "永久保留"}，去重${dedupEnabled ? "开" : "关"}，回车${enterEnabled ? "开" : "关"}，应用时长${usageEnabled ? "开" : "关"}${name ? "，汇报人 " + name : ""}`);
   } else {
     toast((firstErr && firstErr.error) || "保存失败（浏览器预览不可用）");
   }

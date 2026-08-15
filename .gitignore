@@ -7,6 +7,7 @@ reports/
 screenshots/
 state.json
 dailylog.log
+.last_cleanup
 
 # 打包产物（dist/ 内含 .env 密钥副本与个人数据）
 build/

@@ -3,5 +3,6 @@
   "report_name": "",
   "idle_enabled": true,
   "idle_minutes": 5,
-  "recording_enabled": true
+  "recording_enabled": true,
+  "usage_enabled": true
 }

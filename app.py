@@ -6,6 +6,7 @@
 
 注：pywebview 6 移除了内置托盘，这里用 pystray 实现（标准组合方案）。
 """
+import ctypes
 import json
 import shutil
 import sys
@@ -21,6 +22,7 @@ import pystray
 import capture
 import config
 import ui_api
+import usage
 
 _logger = config.setup_logging()
 
@@ -159,7 +161,18 @@ def main() -> None:
     )
     api._window = window
 
+    def _enable_taskbar_minimize(window):
+        """frameless 被 WinForms 去掉 WS_MINIMIZEBOX 样式位，任务栏点击不会最小化，补回。"""
+        user32 = ctypes.windll.user32
+        hwnd = ctypes.c_void_p(window.native.Handle.ToInt64())
+        user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.GetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+        style = user32.GetWindowLongW(hwnd, -16)
+        user32.SetWindowLongW(hwnd, -16, style | 0x00020000)
+
     def on_loaded():
+        _enable_taskbar_minimize(window)
         window.show()
 
     window.events.loaded += on_loaded
@@ -307,7 +320,18 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             _logger.error("启动恢复定时任务失败: %s", e)
 
+    def startup_usage():
+        """启动时按设置确保应用时长采样任务：开启则创建（幂等），关闭则停用。"""
+        try:
+            if config.SETTINGS.get("usage_enabled", True):
+                ui_api.ensure_usage_task()
+            else:
+                ui_api._set_task_enabled(False, ui_api.USAGE_TASK_NAME)
+        except Exception as e:  # noqa: BLE001
+            _logger.error("启动恢复应用时长采样任务失败: %s", e)
+
     threading.Thread(target=startup_enable, daemon=True).start()
+    threading.Thread(target=startup_usage, daemon=True).start()
 
     start_enter_listener()  # 回车键快速记录（全局监听，常驻）
 
@@ -336,6 +360,8 @@ def main() -> None:
 if __name__ == "__main__":
     if "--capture" in sys.argv:
         sys.exit(capture.main())
+    if "--usage" in sys.argv:
+        sys.exit(usage.main())
     if "--diag" in sys.argv:  # 打包诊断：从控制台打印 get_config 与 NextRunTime 异常
         import json as _json
         import traceback as _tb

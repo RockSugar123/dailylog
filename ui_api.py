@@ -14,8 +14,10 @@ import analyze
 import config
 import summarize
 import todos
+import usage
 
 TASK_NAME = "DailyLogCapture"
+USAGE_TASK_NAME = "DailyLogUsage"
 INTERVAL_CHOICES = (5, 10, 15, 30, 60)
 IDLE_CHOICES = config.IDLE_CHOICES
 RETENTION_CHOICES = config.RETENTION_CHOICES
@@ -31,12 +33,12 @@ def _write_settings(**overrides) -> None:
     config.SETTINGS.update(overrides)
 
 
-def _task_command() -> str:
-    """任务计划要执行的命令。打包后（frozen）运行 exe --capture，开发期运行 pythonw capture.py。"""
+def _task_command(flag: str = "--capture", script: str = "capture.py") -> str:
+    """任务计划要执行的命令。打包后（frozen）运行 exe <flag>，开发期运行 pythonw <script>。"""
     if getattr(sys, "frozen", False):
-        return f'"{sys.executable}" --capture'
+        return f'"{sys.executable}" {flag}'
     pyw = Path(sys.executable).with_name("pythonw.exe")
-    return f'"{pyw}" "{config.BASE_DIR / "capture.py"}"'
+    return f'"{pyw}" "{config.BASE_DIR / script}"'
 
 
 def _schtasks(*args: str) -> str:
@@ -85,7 +87,7 @@ def task_next_run() -> str:
         return ""
 
 
-def task_is_enabled() -> bool:
+def task_is_enabled(name: str = TASK_NAME) -> bool:
     """查询任务计划是否启用。
 
     优先用任务计划 COM 接口；COM 失败时回退解析 schtasks XML 的 <Enabled> 元素
@@ -98,7 +100,7 @@ def task_is_enabled() -> bool:
         import win32com.client  # noqa: PLC0415
         scheduler = win32com.client.Dispatch("Schedule.Service")
         scheduler.Connect()
-        task = scheduler.GetFolder("\\").GetTask(TASK_NAME)
+        task = scheduler.GetFolder("\\").GetTask(name)
         return bool(task.Enabled)
     except Exception as e:  # noqa: BLE001
         _logger.warning("查询任务启用状态 COM 失败，回退 XML: %s", e)
@@ -107,7 +109,7 @@ def task_is_enabled() -> bool:
             import pythoncom  # noqa: PLC0415
             pythoncom.CoUninitialize()
     try:
-        xml = _schtasks("/query", "/tn", TASK_NAME, "/xml")
+        xml = _schtasks("/query", "/tn", name, "/xml")
         m = re.search(r"<Enabled>(true|false)</Enabled>", xml)
         return m.group(1) == "true" if m else True
     except RuntimeError as e:
@@ -156,8 +158,8 @@ def _com_init() -> bool:
         return False
 
 
-def _set_task_enabled(enabled: bool) -> None:
-    """启用/停用定时记录。用 COM 进程内直连（毫秒级），schtasks 兜底。
+def _set_task_enabled(enabled: bool, name: str = TASK_NAME) -> None:
+    """启用/停用定时任务。用 COM 进程内直连（毫秒级），schtasks 兜底。
 
     schtasks.exe 是独立进程 + 服务往返，慢（1~3s），在"退出程序"路径上不可接受。
     """
@@ -167,12 +169,12 @@ def _set_task_enabled(enabled: bool) -> None:
         import win32com.client  # noqa: PLC0415
         scheduler = win32com.client.Dispatch("Schedule.Service")
         scheduler.Connect()
-        task = scheduler.GetFolder("\\").GetTask(TASK_NAME)
+        task = scheduler.GetFolder("\\").GetTask(name)
         task.Enabled = enabled
     except Exception as e:  # noqa: BLE001
         _logger.warning("任务启停 COM 失败，回退 schtasks: %s", e)
         try:
-            _schtasks("/change", "/tn", TASK_NAME, "/enable" if enabled else "/disable")
+            _schtasks("/change", "/tn", name, "/enable" if enabled else "/disable")
         except RuntimeError as e2:
             _logger.error("schtasks 启停也失败: %s", e2)
     finally:
@@ -189,6 +191,25 @@ def enable_task() -> None:
 def disable_task() -> None:
     """停用定时记录（托盘"退出程序"时调用）。"""
     _set_task_enabled(False)
+
+
+def ensure_usage_task() -> None:
+    """确保应用时长采样任务存在（应用启动时调用，幂等；创建即启用）。"""
+    _schtasks("/create", "/tn", USAGE_TASK_NAME, "/tr",
+              _task_command("--usage", "usage.py"),
+              "/sc", "minute", "/mo", str(config.USAGE_INTERVAL_MINUTES), "/f")
+
+
+def set_usage_enabled(enabled: bool) -> dict:
+    """应用时长统计开关：写设置 + 创建/停用采样任务计划。"""
+    enabled = bool(enabled)
+    _write_settings(usage_enabled=enabled)
+    config.USAGE_ENABLED = enabled
+    if enabled:
+        ensure_usage_task()
+    else:
+        _set_task_enabled(False, USAGE_TASK_NAME)
+    return {"ok": True, "usage_enabled": enabled}
 
 
 def persist_recording_choice(enabled: bool) -> None:
@@ -229,6 +250,29 @@ class Api:
             d += timedelta(days=1)
         records.sort(key=lambda r: r.get("ts", ""))
         return records
+
+    # ---------- 应用使用时长 ----------
+
+    def get_usage_stats(self, scope: str, date: str = "") -> dict:
+        """应用使用时长统计。scope ∈ day/week/month，date 为该周期内任意一天（YYYY-MM-DD）。"""
+        from datetime import date as _date  # noqa: PLC0415
+        try:
+            day = _date.fromisoformat(date or datetime.now().strftime("%Y-%m-%d"))
+        except ValueError:
+            return {"ok": False, "error": "日期格式错误"}
+        if scope == "week":
+            start = day - timedelta(days=day.weekday())
+            end = start + timedelta(days=6)
+        elif scope == "month":
+            start = day.replace(day=1)
+            end = (start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        else:
+            start = end = day
+        # 时段分布粒度：日视图按小时，周/月视图按天
+        stats = usage.aggregate(start, end, granularity="hour" if scope == "day" else "day")
+        stats.update({"ok": True, "scope": scope, "start": start.isoformat(), "end": end.isoformat(),
+                      "days": (end - start).days + 1})
+        return stats
 
     # ---------- 报告 ----------
 
@@ -308,6 +352,7 @@ class Api:
             "enter_capture_enabled": bool(config.SETTINGS.get("enter_capture_enabled", False)),
             "enter_capture_interval": config.SETTINGS.get("enter_capture_interval", 15),
             "enter_interval_choices": list(config.ENTER_INTERVAL_CHOICES),
+            "usage_enabled": bool(config.SETTINGS.get("usage_enabled", True)),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
             "has_analyze_key": bool(config.ANALYZE_API_KEY),
             "has_summary_key": bool(config.DEEPSEEK_API_KEY),
@@ -413,7 +458,7 @@ class Api:
     EXPORT_SETTING_KEYS = (
         "interval_minutes", "report_name", "idle_enabled", "idle_minutes",
         "retention_days", "recording_enabled", "dedup_enabled",
-        "enter_capture_enabled", "enter_capture_interval",
+        "enter_capture_enabled", "enter_capture_interval", "usage_enabled",
     )
 
     def export_data(self, path: str) -> dict:
@@ -491,6 +536,8 @@ class Api:
             for p in config.REPORTS_DIR.glob("*.md"):
                 p.unlink(missing_ok=True)
                 removed["reports"] += 1
+            for p in config.USAGE_DIR.glob("*.jsonl"):  # 应用使用时长数据一并清除
+                p.unlink(missing_ok=True)
             for p in config.BASE_DIR.glob("dailylog.log*"):
                 p.unlink(missing_ok=True)
             config.TODOS_FILE.unlink(missing_ok=True)

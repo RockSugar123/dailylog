@@ -164,6 +164,15 @@ def cleanup_expired() -> None:
         if span and span[1] < cutoff:  # 报告覆盖期整体早于窗口 → 删
             p.unlink(missing_ok=True)
             removed += 1
+    if config.USAGE_DIR.exists():  # 应用使用时长采样数据同样受保留天数约束
+        for p in config.USAGE_DIR.glob("*.jsonl"):
+            try:
+                day = datetime.strptime(p.stem, "%Y-%m-%d").date()
+            except ValueError:
+                continue  # 文件名不是日期（垃圾文件），跳过
+            if day < cutoff:
+                p.unlink(missing_ok=True)
+                removed += 1
     try:
         marker.write_text(today.isoformat(), encoding="utf-8")
     except OSError as e:
@@ -242,11 +251,25 @@ def main(force: bool = False) -> int:
             png_path.unlink(missing_ok=True)
         return 1
 
+    # 当日已有待办：随分析请求带上，让模型跳过重复/进展类内容，避免待办碎片化
+    existing_todos = []
+    raw_path = config.RAW_DIR / f"{ts:%Y-%m-%d}.jsonl"
+    if raw_path.exists():
+        try:
+            for line in raw_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                todo = json.loads(line).get("todo")
+                if todo:
+                    existing_todos.append(str(todo))
+        except (OSError, json.JSONDecodeError):
+            pass
     record = None
     try:
         for attempt in range(config.MAX_RETRIES + 1):
             try:
-                record = analyze.call_analyze(analyze.encode_image(png_path))
+                record = analyze.call_analyze(analyze.encode_image(png_path), existing_todos)
                 break
             except Exception as e:
                 log(f"分析失败(第{attempt + 1}次): {e}")
