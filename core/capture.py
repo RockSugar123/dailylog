@@ -134,10 +134,20 @@ def cleanup_expired() -> None:
     不能写进 state.json：capture 的 save_state 是整体覆盖，并存字段会丢。
     """
     days = config.SETTINGS.get("retention_days", 0)
-    if not days:
-        return
     marker = config.DATA_DIR / ".last_cleanup"
     today = datetime.now().date()
+    # 截图兜底清扫：正常流程分析完即删（finally 保证），这里只处理
+    # 进程被强杀/崩溃留下的孤儿文件，超 1 天无条件删除（与保留天数设置无关）
+    if config.SCREENSHOTS_DIR.exists():
+        cutoff_ts = time.time() - 86400
+        for p in config.SCREENSHOTS_DIR.glob("*.png"):
+            try:
+                if p.stat().st_mtime < cutoff_ts:
+                    p.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if not days:
+        return
     try:
         if marker.exists() and marker.read_text(encoding="utf-8").strip() == today.isoformat():
             return
