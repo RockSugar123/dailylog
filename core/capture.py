@@ -136,7 +136,7 @@ def cleanup_expired() -> None:
     days = config.SETTINGS.get("retention_days", 0)
     if not days:
         return
-    marker = config.BASE_DIR / ".last_cleanup"
+    marker = config.DATA_DIR / ".last_cleanup"
     today = datetime.now().date()
     try:
         if marker.exists() and marker.read_text(encoding="utf-8").strip() == today.isoformat():

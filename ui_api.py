@@ -23,7 +23,7 @@ def _write_settings(**overrides) -> None:
     """写 settings.json（保留其余键）并同步 config.SETTINGS。"""
     data = dict(config.SETTINGS)
     data.update(overrides)
-    (config.BASE_DIR / "settings.json").write_text(
+    (config.DATA_DIR / "settings.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8",
     )
     config.SETTINGS.update(overrides)
@@ -357,7 +357,7 @@ class Api:
 
     def get_logs(self, limit: int = 300) -> dict:
         """读运行日志尾部（最新在前），供左侧日志页查看报错原因。"""
-        path = config.BASE_DIR / "dailylog.log"
+        path = config.DATA_DIR / "dailylog.log"
         if not path.exists():
             return {"ok": True, "logs": []}
         try:
@@ -543,7 +543,7 @@ class Api:
                 removed["reports"] += 1
             for p in config.USAGE_DIR.glob("*.jsonl"):  # 应用使用时长数据一并清除
                 p.unlink(missing_ok=True)
-            for p in config.BASE_DIR.glob("dailylog.log*"):
+            for p in config.DATA_DIR.glob("dailylog.log*"):
                 p.unlink(missing_ok=True)
             config.TODOS_FILE.unlink(missing_ok=True)
             config.STATE_FILE.unlink(missing_ok=True)

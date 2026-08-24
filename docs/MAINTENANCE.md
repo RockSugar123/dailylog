@@ -6,7 +6,7 @@
 ## 1. 目录结构总览
 
 ```
-dailylog/
+dailylog/                     # 源码仓库：只放代码和文档，不含任何运行数据
 ├── app.py              # GUI 主程序入口（pywebview 窗口 + pystray 托盘）
 ├── ui_api.py           # 前端 API 桥接层（前端所有可调用的后端方法都在这，纯 Python 可无 GUI 直测）
 ├── core/               # 全部业务模块（Python 包）
@@ -17,18 +17,19 @@ dailylog/
 │   ├── analyze.py      # 视觉模型调用 + prompt + JSON 解析
 │   ├── llm.py          # 统一 LLM 请求通道
 │   └── todos.py        # 待办管理
+├── data/               # 【开发版运行数据】records/reports/.env/settings.json/日志，全在这（gitignore）
 ├── static/             # 前端三件套 + 图标 + 字体
 │   └── assets/         # icon.ico / tray.ico（spec 打包引用 icon.ico，别改名）
 ├── docs/               # 文档：PRD、STATUS.md、MAINTENANCE.md、skins-demo.html、images/
-├── records/            # 【运行时产物】时间线记录 + raw jsonl + usage 采样（gitignore）
-├── reports/            # 【运行时产物】生成的日报/周报（gitignore）
-├── build.bat           # 唯一合法的打包入口（见第 4 节）
-├── dailylog.spec       # PyInstaller 配置（入口 app.py；datas 收 static/）
-└── dist/dailylog/      # 部署目录 = 打包版的运行环境（含数据，见第 3 节）
+├── build.bat           # 唯一合法的打包入口（见第 4 节），部署到项目外的 ..\dailylog-app
+└── dailylog.spec       # PyInstaller 配置（入口 app.py；datas 收 static/）
+
+dailylog-app\              # 部署目录（项目外、仓库外）：纯产物，只有 exe + _internal/
+%LOCALAPPDATA%\dailylog\   # 打包版运行数据：records/reports/.env/settings.json/日志/webview
 ```
 
-**根目录的杂项文件都是开发版运行数据**：`.env`（密钥）、`settings.json`、`state.json`、
-`dailylog.log`、`.last_cleanup`。它们由程序生成、已被 gitignore，**不要手动创建或提交**。
+**三个物理位置各司其职**：源码仓库（可随意重建）、部署目录（可被构建整目录重建）、
+运行数据（不可再生，永远不在前两者的目录里）。
 
 ## 2. 新文件该放哪
 
@@ -48,32 +49,35 @@ dailylog/
 **新增 core 模块后**：无需改 dailylog.spec，PyInstaller 会从 `app.py` 静态分析跟进；
 但若模块是**运行时动态 import** 的，要加进 spec 的 `hiddenimports`。
 
-## 3. 两套数据目录（最容易踩的坑）
+## 3. 数据目录：由 DATA_DIR 决定（最容易踩的坑）
 
-同一个程序有两种跑法，**数据目录不同**（由 `core/config.py` 的 BASE_DIR 决定）：
+数据目录统一由 `core/config.py` 的 `DATA_DIR` 决定，与代码（BASE_DIR）分离：
 
-- **开发版**（`python app.py`）：数据在项目根目录（records/reports/settings.json 都在这）
-- **打包版**（`dist\dailylog\dailylog.exe`）：frozen 模式，BASE_DIR = exe 所在目录，
-  数据全在 `dist\dailylog\` 里
+- **开发版**（`python app.py`）：DATA_DIR = 项目根的 `data\`
+- **打包版**（`dailylog-app\dailylog.exe`）：frozen 模式，DATA_DIR = `%LOCALAPPDATA%\dailylog\`
 
-排查任何"数据不见了/设置没生效"的问题，第一步先确认看的是哪一套目录。
-桌面快捷方式指向的是打包版。
+两套目录内容相同：records/、reports/、screenshots/、.env（密钥）、settings.json、
+state.json、.last_cleanup、dailylog.log。
 
-## 4. 打包（红线，出过事故）
+排查任何"数据不见了/设置没生效"的问题，第一步先确认看的是哪一套。
+桌面快捷方式指向的是打包版（数据在 LOCALAPPDATA）。
 
-**只允许用 `build.bat`，禁止手敲 PyInstaller 命令直接输出到 `dist\dailylog\`。**
+## 4. 打包
 
-原因：PyInstaller onedir 会**清空重建输出目录**，而 `dist\dailylog\` 里混着运行数据
-（.env 密钥、全部工作记录）。2026-08-04 曾因此丢失过不可恢复的记录。
+**只允许用 `build.bat`，禁止手敲 PyInstaller 命令直接输出到部署目录。**
 
-build.bat 的流程：PyInstaller 先输出到临时 `dist_build\` → robocopy `/MIR` 镜像部署到
-`dist\dailylog\`，用 `/XF /XD` 排除清单保住数据文件 → 删临时目录。
+历史教训：PyInstaller onedir 会**清空重建输出目录**，2026-08-04 曾因直接往含数据的
+目录打包丢失过不可恢复的记录。现在的防御是双重的：
+
+1. 打包先输出到临时 `dist_build\` → robocopy `/MIR` 镜像到项目外的 `..\dailylog-app` → 删临时目录
+2. 运行数据在 `%LOCALAPPDATA%\dailylog`，根本不在部署目录里——即使误删部署目录也不伤数据
+   （因此 build.bat 不再需要 /XF /XD 排除清单；若未来新增"写在 exe 旁的数据"，说明设计偏离了本约定，应改回 DATA_DIR）
 
 **维护规则**：
-- 程序新增"写在 exe 同目录的数据文件"时，必须同步把文件名加进 build.bat 的 `/XF` 排除清单
-  （现有排除：.env .last_cleanup settings.json state.json dailylog.log；/XD：records reports screenshots）
-- 改动部署流程前先想清楚"这次操作会让 dist 下哪些文件变化"，不确定就先备份
-- 打包后验证三件事：exe 能启动、日志正常、records 当日文件还在
+- 改动部署流程前先想清楚"这次操作会让哪些文件变化"，不确定就先备份
+- 打包后验证三件事：exe 能启动、日志正常、LOCALAPPDATA 下 records 当日文件还在
+- 桌面快捷方式与任务计划（DailyLogCapture/DailyLogUsage）指向部署目录的 exe；
+  换部署位置时三处要同步更新
 
 ## 5. 状态文档约定
 

@@ -8,18 +8,23 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# 打包后（frozen）数据目录是 exe 所在目录；开发期是源码目录
+# BASE_DIR = 源码根（开发期）或 exe 所在目录（打包后），用于定位代码/脚本；
+# DATA_DIR = 运行数据（记录/报告/设置/密钥/日志），与代码和构建产物彻底分离：
+# 开发期在项目 data/ 下，打包后在 %LOCALAPPDATA%\dailylog——构建重建部署目录不会伤到数据
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "dailylog"
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+    DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+load_dotenv(DATA_DIR / ".env")
 
 
 def load_settings() -> dict:
     """读取运行时设置（settings.json，UI 可修改；缺省用代码里的默认值）。"""
     try:
-        return json.loads((BASE_DIR / "settings.json").read_text(encoding="utf-8"))
+        return json.loads((DATA_DIR / "settings.json").read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
@@ -35,7 +40,7 @@ def setup_logging() -> logging.Logger:
         return logger
     logger.setLevel(logging.INFO)
     handler = RotatingFileHandler(
-        BASE_DIR / "dailylog.log",
+        DATA_DIR / "dailylog.log",
         maxBytes=1_000_000, backupCount=3, encoding="utf-8",
     )
     handler.setFormatter(logging.Formatter(
@@ -70,12 +75,12 @@ ENTER_INTERVAL_CHOICES = (5, 15, 30, 60)  # 回车键记录间隔选项（秒）
 MAX_RETRIES = 1                  # API 失败重试次数
 
 # 目录与状态
-RECORDS_DIR = BASE_DIR / "records"
+RECORDS_DIR = DATA_DIR / "records"
 RAW_DIR = RECORDS_DIR / "raw"
-REPORTS_DIR = BASE_DIR / "reports"
-SCREENSHOTS_DIR = BASE_DIR / "screenshots"
+REPORTS_DIR = DATA_DIR / "reports"
+SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 TODOS_FILE = RECORDS_DIR / "todos.json"
-STATE_FILE = BASE_DIR / "state.json"
+STATE_FILE = DATA_DIR / "state.json"
 
 # 应用使用时长统计（前台窗口采样，任务计划 DailyLogUsage 每 2 分钟驱动一次）
 USAGE_DIR = RECORDS_DIR / "usage"

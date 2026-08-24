@@ -1,9 +1,13 @@
 @echo off
-rem Safe packaging: build to a temp dir first, then mirror-deploy into dist\dailylog.
-rem PyInstaller onedir wipes the output dir, so NEVER use dist\dailylog as distpath
-rem (it would delete runtime data). /MIR sync excludes all data files/dirs below.
+rem Safe packaging: PyInstaller onedir wipes its output dir, so NEVER build
+rem directly into the deploy target. Build to a temp dir first, then mirror.
+rem Runtime data lives in %LOCALAPPDATA%\dailylog (core/config.py DATA_DIR),
+rem NOT next to the exe, so the mirror needs no data-exclusion list.
 setlocal
 cd /d "%~dp0"
+
+rem Deploy outside the repo: dev tree stays clean, builds can never touch sources/data
+set "DEPLOY_DIR=%~dp0..\dailylog-app"
 
 python -m PyInstaller dailylog.spec --noconfirm --distpath dist_build
 if errorlevel 1 (
@@ -11,13 +15,11 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Mirror exe + _internal, keep runtime data untouched
-robocopy dist_build\dailylog dist\dailylog /MIR /XF .env .last_cleanup settings.json state.json dailylog.log /XD records reports screenshots
+robocopy dist_build\dailylog "%DEPLOY_DIR%" /MIR /NJH
 if errorlevel 8 (
-    echo ROBCOPY FAILED (code %errorlevel%)
-    rmdir /s /q dist_build
+    echo ROBCOPY FAILED - keeping dist_build for inspection
     exit /b 1
 )
 
 rmdir /s /q dist_build
-echo DONE: dist\dailylog updated, runtime data untouched
+echo DONE: deployed to %DEPLOY_DIR%

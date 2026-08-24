@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 ### 2. 配置 API Key
 
-按 [.env.example](.env.example) 的键名填写（开发期放源码目录，打包后放 exe 同目录——打包版只读 exe 旁边的 .env）：
+按 [.env.example](.env.example) 的键名填写（开发期放项目 `data\` 目录，打包版放在 `%LOCALAPPDATA%\dailylog\.env`）：
 
 ```
 ANALYZE_API_KEY=你的NVIDIA Key
@@ -107,9 +107,9 @@ python app.py
 | 生成今天的日报 | `python core\summarize.py` |
 | 生成某日日报 | `python core\summarize.py --day 2026-07-31` |
 | 生成某周周报（该日期所在 ISO 周） | `python core\summarize.py --week 2026-07-31` |
-| 打包版桌面应用 | `dist\dailylog\dailylog.exe` |
-| 打包版截屏记录 | `dist\dailylog\dailylog.exe --capture` |
-| 打包诊断（打印任务计划/配置状态） | `dist\dailylog\dailylog.exe --diag` |
+| 打包版桌面应用 | `..\dailylog-app\dailylog.exe` |
+| 打包版截屏记录 | `..\dailylog-app\dailylog.exe --capture` |
+| 打包诊断（打印任务计划/配置状态） | `..\dailylog-app\dailylog.exe --diag` |
 
 ### 注册 Windows 定时任务（可选，应用启动时会自动注册）
 
@@ -117,8 +117,8 @@ python app.py
 # 开发期（pythonw 无控制台窗口；/f 覆盖已存在任务）
 schtasks /create /tn DailyLogCapture /tr "\"<pythonw全路径>\" <项目绝对路径>\core\capture.py" /sc minute /mo 10 /f
 
-# 打包后（onedir，exe 在 dist\dailylog\ 下）
-schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dist\dailylog\dailylog.exe\" --capture" /sc minute /mo 10 /f
+# 打包后（部署在项目外 ..\dailylog-app\）
+schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dailylog-app\dailylog.exe\" --capture" /sc minute /mo 10 /f
 
 schtasks /run /tn DailyLogCapture    # 手动触发一次（冒烟测试）
 schtasks /delete /tn DailyLogCapture /f   # 卸载
@@ -216,48 +216,38 @@ dailylog/
 ├── ui_api.py               # 桌面应用 API 桥：时间线/报告/设置/任务计划管理（纯 Python，可无 GUI 直测）
 ├── app.py                  # 桌面应用入口：pywebview 无边框窗口 + pystray 托盘
 ├── dailylog.spec           # PyInstaller 打包配置（onedir）
-├── settings.json           # 运行时设置（开发版；UI 可改）
-├── state.json              # 运行时状态（开发版；上张截图哈希，去重用）
-├── .last_cleanup           # 数据清理节流标记（当天已清理则跳过，存日期字符串）
-├── records/                # 开发版时间线记录（raw/YYYY-MM-DD.jsonl + YYYY-MM-DD.md）
-├── reports/                # 开发版生成的日报/周报
+├── data/                   # 开发版运行数据：records/ reports/ .env settings.json 日志等
 ├── static/                 # 前端（index.html / style.css / script.js）
-├── docs/                   # 文档与说明图（images/）
-└── dist/
-    └── dailylog/           # 打包版（onedir）：exe + _internal/ 依赖库
-        ├── dailylog.exe    # 打包版可执行文件（数据与 exe 同目录）
-        ├── _internal/      # 打包依赖库（勿动）
-        ├── .env            # 打包版 API Key（勿随包分发）
-        ├── settings.json   # 打包版运行时设置（UI 可改）
-        ├── state.json      # 打包版运行时状态
-        ├── .last_cleanup   # 数据清理节流标记
-        ├── records/        # 打包版时间线记录（最终产物）
-        ├── reports/        # 打包版日报/周报
-        └── dailylog.log    # 打包版运行日志
+└── docs/                   # 文档与说明图（images/）
+
+# 部署目录（项目外）：..\dailylog-app\
+# └── dailylog.exe + _internal/   纯产物，不含任何数据
+# 打包版运行数据：%LOCALAPPDATA%\dailylog\（records/reports/.env/settings.json 等）
 ```
 
-> **数据位置**：打包版与开发版各自独立——打包版数据在 `dist/dailylog/`（exe 同目录），开发版数据在项目根目录。
+> **数据位置**：由 `core/config.py` 的 `DATA_DIR` 决定，与代码和构建产物分离——开发版在项目 `data/`，打包版在 `%LOCALAPPDATA%\dailylog/`。
 
 </details>
 
 ## 🧑‍💻 开发与打包
 
 ```bash
-build.bat                 # 推荐：安全打包（产物先出临时目录再部署，不碰运行数据）
+build.bat                 # 唯一入口：打包到临时目录再镜像部署到项目外 ..\dailylog-app
 pyinstaller dailylog.spec # 注意：onedir 模式会清空重建输出目录！
 ```
 
-**重要**：PyInstaller onedir 打包会**清空重建输出目录**。`dailylog.spec` 未指定 distpath 时输出到 `dist/dailylog/`——若直接打包会删掉里面的运行数据（`.env`、`records/` 等）。**务必使用 `build.bat`**（打包到临时目录 `dist_build/` 后用 `/MIR` 镜像部署，显式排除数据文件/目录）。
+**重要**：PyInstaller onedir 打包会**清空重建输出目录**。**务必使用 `build.bat`**（打包到临时 `dist_build/` 后镜像部署到项目外的 `..\dailylog-app`）。运行数据在 `%LOCALAPPDATA%\dailylog\`，不在部署目录里，构建不会伤到数据。
 
 其他注意：
 
-- onedir 模式：桌面应用/截屏记录/诊断都指向 `dist\dailylog\dailylog.exe`；数据在 **exe 同目录**（`.env`、`settings.json`、`records/`、`reports/`），不要把含密钥的 `dist\dailylog\.env` 随包分发
+- 打包版数据（`.env`、`settings.json`、`records/`、`reports/`）在 `%LOCALAPPDATA%\dailylog\`，不要把含密钥的 `.env` 随包分发
+- 换部署位置时需同步三处：build.bat 的 `DEPLOY_DIR`、桌面快捷方式、任务计划 DailyLogCapture / DailyLogUsage 的 exe 路径
 - 打包环境需额外安装 pyinstaller
 - WebView2 数据目录固定在 `%LOCALAPPDATA%\dailylog\webview`（避免每次启动新建临时目录）；历史残留由应用启动时自动清理
 
 ## 🩺 故障排查
 
-- **所有运行日志**：`dailylog.log`（1MB 轮转保留 3 份），与源码/exe 同目录
+- **所有运行日志**：`dailylog.log`（1MB 轮转保留 3 份），开发版在项目 `data\` 下、打包版在 `%LOCALAPPDATA%\dailylog\`
 - **任务计划未生效**：设置页「当前状态」会显示"已停用"；用 `schtasks /query /tn DailyLogCapture` 检查
 - **API 报错**：错误会带响应体前 300 字符写入日志，便于定位（如 400 模型名/Key 错误）
 - **测试秒级记录**：设置页或 `apply_test_interval` 写入 `test_interval_seconds` 后，应用内自动进入测试循环（任务计划 schema 限制最小 1 分钟，秒级只能由应用进程驱动）

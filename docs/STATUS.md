@@ -8,11 +8,13 @@
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
   - 根目录只留入口与桥接：`app.py`（GUI 主程序）、`ui_api.py`（前端 API 桥接）
-  - `core/config.py` 的 `BASE_DIR`：frozen 时 = exe 所在目录；开发时 = 项目根（注意是 `.parent.parent`）
+  - `core/config.py`：BASE_DIR = 源码根/exe 目录（定位代码），DATA_DIR = 运行数据目录，
+    **两者已分离**——开发版 DATA_DIR = 项目 `data\`，打包版 = `%LOCALAPPDATA%\dailylog`
   - capture / usage / summarize 会被任务计划或命令行**直接运行**，文件头部有 sys.path 引导，
     内部一律用 `from core import X` 绝对导入
 - `static/`：前端三件套 + 图标/字体。**改前端必须重跑 build.bat 才对打包版生效**
-- 任务计划开发模式命令由 `ui_api._task_command()` 生成，脚本路径已指向 `core/capture.py`、`core/usage.py`
+- 部署目录在项目外：`Desktop\dailylog-app\`（纯产物）；打包版数据在 `%LOCALAPPDATA%\dailylog`
+- 任务计划开发模式命令由 `ui_api._task_command()` 生成，脚本路径指向 `core/capture.py`、`core/usage.py`
 - 目录规范与新文件归属见 `docs/MAINTENANCE.md`
 
 ### 零窗口托盘化（2026-08-24 落地，内存 ~562MB → 关窗后 ~74MB）
@@ -36,15 +38,26 @@
 4. 接受现状：显示 ~562MB 对 WebView2 GUI 属正常水平
 
 ## 遗留 / 注意事项
-- **两套数据目录**：开发跑在项目根，打包版跑在 `dist\dailylog\`（frozen 后 BASE_DIR = exe 所在目录）。
+- **两套数据目录**：开发版在项目 `data\`，打包版在 `%LOCALAPPDATA%\dailylog`。
   排查数据问题先分清看的是哪一套
 - `visibilitychange` 暂停 FX 依赖 WebView2 把隐藏窗口标记为 hidden，未逐项验证
-- 打包版静态文件在 `dist\dailylog\_internal\static`，改前端必须重跑 build.bat 才生效
+- 改前端必须重跑 build.bat 部署到 `Desktop\dailylog-app` 才生效
+- 换部署位置时三处同步：桌面快捷方式、任务计划 DailyLogCapture/DailyLogUsage、build.bat 的 DEPLOY_DIR
 - 维护与打包约定见 `docs/MAINTENANCE.md`
-- 结构整理（core/ 分层 + 清理 + 文档）与黑猫图标已提交（5df8faf / 55bcdf0）；
-  **下次改动前端后记得重跑 build.bat 部署**（当前 dist 里还是旧结构打包版，不影响运行）
 
 ## 变更日志（摘要）
+
+### 2026-08-25 数据/部署/源码三分离（根治打包事故类风险）
+- `core/config.py` 新增 DATA_DIR（数据）与 BASE_DIR（代码定位）分离：
+  开发版数据 → 项目 `data\`；frozen 数据 → `%LOCALAPPDATA%\dailylog`（与 WEBVIEW_DIR 同区）
+- 全模块数据路径改走 DATA_DIR；`ui_api._task_command()` 仍用 BASE_DIR 定位脚本（语义正确）
+- build.bat：部署目标改为项目外 `..\dailylog-app`，数据已不在部署目录，
+  robocopy 排除清单整体删除；旧 `dist\` 已删除
+- 数据迁移：开发数据移入 `data\`；dist 内 49 个记录文件 + .env/settings/state 等复制到
+  LOCALAPPDATA 并核对一致后删 dist
+- 桌面快捷方式、DailyLogCapture/DailyLogUsage 任务计划已指向新 exe 路径并启用
+- 新 exe 实测：启动正常（回车监听、托盘、窗口均工作）；后被托盘「退出程序」正常退出
+- 文档同步：MAINTENANCE.md 第 1/3/4 节重写、.gitignore 收敛为 data/ 一条
 
 ### 2026-08-25 项目结构整理（方案 B 分层）
 - 7 个业务模块 git mv 进 `core/`（保留历史），根目录只留 app.py / ui_api.py；新增 `core/__init__.py`
@@ -59,8 +72,7 @@
 - 文档：两份 STATUS 合并为本文档；新建 `docs/MAINTENANCE.md`（目录规范 + 打包红线）；
   README 中英文版的目录树 / 命令表 / schtasks 示例同步 core/ 路径
 - 验证：py_compile 全过、ui_api/app 导入正常、`python core\summarize.py --help` 正常、
-  node --check 过。**未提交 git**；`static/assets/icon.ico` 有未提交的黑猫新图标修改，
-  待确认后随本次改动一起提交
+  node --check 过（已提交 5df8faf，黑猫图标见 55bcdf0）
 
 ### 2026-08-24
 - 零窗口托盘化落地并打包部署（详见上文架构要点）；修复专注时长浮点显示（fmtMin 取整）、

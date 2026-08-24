@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 ### 2. Configure API keys
 
-Fill in the keys following [.env.example](.env.example) (place it in the source directory during development, or next to the exe for the packaged build — the packaged build only reads the .env next to the exe):
+Fill in the keys following [.env.example](.env.example) (place it in the project's `data\` directory during development; the packaged build reads `%LOCALAPPDATA%\dailylog\.env`):
 
 ```
 ANALYZE_API_KEY=your-NVIDIA-key
@@ -107,9 +107,9 @@ On startup the app automatically registers the Windows scheduled task `DailyLogC
 | Generate today's daily report | `python core\summarize.py` |
 | Generate a specific day's report | `python core\summarize.py --day 2026-07-31` |
 | Generate a weekly report (ISO week of that date) | `python core\summarize.py --week 2026-07-31` |
-| Packaged desktop app | `dist\dailylog\dailylog.exe` |
-| Packaged capture | `dist\dailylog\dailylog.exe --capture` |
-| Packaged diagnostics (prints scheduler/config status) | `dist\dailylog\dailylog.exe --diag` |
+| Packaged desktop app | `..\dailylog-app\dailylog.exe` |
+| Packaged capture | `..\dailylog-app\dailylog.exe --capture` |
+| Packaged diagnostics (prints scheduler/config status) | `..\dailylog-app\dailylog.exe --diag` |
 
 ### Registering the Windows scheduled task (optional; auto-registered on app startup)
 
@@ -117,8 +117,8 @@ On startup the app automatically registers the Windows scheduled task `DailyLogC
 # Development (pythonw = no console window; /f overwrites an existing task)
 schtasks /create /tn DailyLogCapture /tr "\"<full-path-to-pythonw>\" <absolute-project-path>\capture.py" /sc minute /mo 10 /f
 
-# Packaged build (onedir, exe under dist\dailylog\)
-schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dist\dailylog\dailylog.exe\" --capture" /sc minute /mo 10 /f
+# Packaged build (deployed outside the repo, ..\dailylog-app\)
+schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dailylog-app\dailylog.exe\" --capture" /sc minute /mo 10 /f
 
 schtasks /run /tn DailyLogCapture    # Trigger once manually (smoke test)
 schtasks /delete /tn DailyLogCapture /f   # Uninstall
@@ -217,48 +217,38 @@ dailylog/
 ├── ui_api.py               # Desktop API bridge: timeline/reports/settings/scheduler (pure Python, testable without GUI)
 ├── app.py                  # Desktop entry: pywebview borderless window + pystray tray
 ├── dailylog.spec           # PyInstaller packaging config (onedir)
-├── settings.json           # Runtime settings (dev build; editable in UI)
-├── state.json              # Runtime state (dev build; last screenshot hash for dedup)
-├── .last_cleanup           # Cleanup throttle marker (date string; skips if already cleaned today)
-├── records/                # Dev-build timeline logs (raw/YYYY-MM-DD.jsonl + YYYY-MM-DD.md)
-├── reports/                # Dev-build daily/weekly reports
+├── data/                   # Dev-build runtime data: records/ reports/ .env settings.json logs, etc.
 ├── static/                 # Frontend (index.html / style.css / script.js)
-├── docs/                   # Docs & screenshots (images/)
-└── dist/
-    └── dailylog/           # Packaged build (onedir): exe + _internal/ libs
-        ├── dailylog.exe    # Packaged executable (data lives next to the exe)
-        ├── _internal/      # Bundled dependencies (do not touch)
-        ├── .env            # Packaged-build API keys (never distribute)
-        ├── settings.json   # Packaged-build runtime settings (editable in UI)
-        ├── state.json      # Packaged-build runtime state
-        ├── .last_cleanup   # Cleanup throttle marker
-        ├── records/        # Packaged-build timeline logs (final artifacts)
-        ├── reports/        # Packaged-build daily/weekly reports
-        └── dailylog.log    # Packaged-build runtime log
+└── docs/                   # Docs & screenshots (images/)
+
+# Deploy directory (outside the repo): ..\dailylog-app\
+# └── dailylog.exe + _internal/   pure product, contains no data
+# Packaged-build runtime data: %LOCALAPPDATA%\dailylog\ (records/reports/.env/settings.json etc.)
 ```
 
-> **Data locations**: packaged and dev builds are independent — packaged data lives in `dist/dailylog/` (next to the exe), dev-build data in the project root.
+> **Data locations**: determined by `DATA_DIR` in `core/config.py`, kept separate from code and build artifacts — dev build uses the project's `data/`, packaged build uses `%LOCALAPPDATA%\dailylog/`.
 
 </details>
 
 ## 🧑‍💻 Development & Packaging
 
 ```bash
-build.bat                 # Recommended: safe packaging (builds to a temp dir, then deploys — never touches runtime data)
+build.bat                 # The only entry: builds to a temp dir, then mirror-deploys to ..\dailylog-app (outside the repo)
 pyinstaller dailylog.spec # Warning: onedir mode wipes and rebuilds the output directory!
 ```
 
-**Important**: PyInstaller onedir packaging **wipes and rebuilds the output directory**. Without an explicit distpath, `dailylog.spec` outputs to `dist/dailylog/` — packaging directly will delete runtime data inside (`.env`, `records/`, etc.). **Always use `build.bat`** (builds to a temp `dist_build/` then deploys with a `/MIR` mirror, explicitly excluding data files/dirs).
+**Important**: PyInstaller onedir packaging **wipes and rebuilds the output directory**. **Always use `build.bat`** (builds to a temp `dist_build/`, then mirror-deploys to `..\dailylog-app` outside the repo). Runtime data lives in `%LOCALAPPDATA%\dailylog\`, not in the deploy directory, so builds can never touch it.
 
 Other notes:
 
-- onedir mode: desktop app / capture / diagnostics all point to `dist\dailylog\dailylog.exe`; data lives **next to the exe** (`.env`, `settings.json`, `records/`, `reports/`) — never distribute `dist\dailylog\.env` containing keys
+- Packaged-build data (`.env`, `settings.json`, `records/`, `reports/`) lives in `%LOCALAPPDATA%\dailylog\`; never distribute the key-containing `.env`
+- When changing the deploy location, update three places: `DEPLOY_DIR` in build.bat, the desktop shortcut, and the exe paths of scheduled tasks DailyLogCapture / DailyLogUsage
 - The packaging environment needs pyinstaller installed separately
 - The WebView2 data directory is pinned to `%LOCALAPPDATA%\dailylog\webview` (avoids creating a new temp dir on every launch); stale leftovers are cleaned automatically on startup
 
 ## 🩺 Troubleshooting
 
-- **All runtime logs**: `dailylog.log` (1MB rotation, 3 copies kept), in the same directory as the source/exe
+- **All runtime logs**: `dailylog.log` (1MB rotation, 3 copies kept) — dev build under the project's `data\`, packaged build under `%LOCALAPPDATA%\dailylog\`
 - **Scheduled task not firing**: the Settings page "Current status" shows "disabled"; check with `schtasks /query /tn DailyLogCapture`
 - **API errors**: errors are logged with the first 300 chars of the response body for diagnosis (e.g. 400 = wrong model name/key)
 - **Sub-minute test recording**: after writing `test_interval_seconds` (Settings page or `apply_test_interval`), the app enters a test loop in-process (Task Scheduler schema has a 1-minute minimum, so sub-minute intervals must be driven by the app process)
