@@ -12,7 +12,7 @@ if errorlevel 1 (
 )
 
 rem Mirror exe + _internal, keep runtime data untouched
-robocopy dist_build\dailylog dist\dailylog /MIR /XF .env settings.json state.json dailylog.log /XD records reports screenshots
+robocopy dist_build\dailylog dist\dailylog /MIR /XF .env .last_cleanup settings.json state.json dailylog.log /XD records reports screenshots
 if errorlevel 8 (
     echo ROBCOPY FAILED (code %errorlevel%)
     rmdir /s /q dist_build

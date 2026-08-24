@@ -1,6 +1,7 @@
 """dailylog 桌面应用入口：pywebview 窗口 + pystray 系统托盘。
 
-- 关闭按钮 → 最小化到托盘（进程常驻，定时记录继续）
+- 关闭按钮 → 销毁窗口进零窗口挂起（进程常驻，定时记录继续）；托盘「打开程序」二次
+  webview.start() 重建（pywebview 未文档化用法，依赖源码行为：最后窗口销毁 → start 返回）
 - 托盘右键：打开程序 / 开始记录 / 退出程序（退出时停用定时记录）
 - 打包后（frozen）任务计划调用本 exe 的 --capture 参数执行截屏分析
 
@@ -19,10 +20,8 @@ import webview
 from PIL import Image
 import pystray
 
-import capture
 import config
 import ui_api
-import usage
 
 _logger = config.setup_logging()
 
@@ -63,10 +62,15 @@ class AppApi(ui_api.Api):
         self._window = window
         self._maximized = False
         self._tray_refresh = lambda: None
+        self._hide_to_tray = lambda: None
 
     def set_tray_refresh(self, fn) -> None:
         """标题栏总开关切换后，同步托盘菜单文案的回调。"""
         self._tray_refresh = fn
+
+    def set_hide_to_tray(self, fn) -> None:
+        """标题栏 ✕ 触发的托盘化回调（销毁唯一窗口进零窗口挂起，见 main）。"""
+        self._hide_to_tray = fn
 
     def toggle_recording(self) -> dict:
         result = super().toggle_recording()
@@ -79,6 +83,7 @@ class AppApi(ui_api.Api):
     def manual_capture(self) -> dict:
         """设置页按钮/全局热键触发：立即截屏分析记录（force 跳过去重与空闲检查）。"""
         try:
+            import capture  # noqa: PLC0415 延迟导入：截屏依赖只在需要时进内存
             code = capture.main(force=True)
             return {"ok": code == 0}
         except Exception as e:  # noqa: BLE001
@@ -127,8 +132,8 @@ class AppApi(ui_api.Api):
         self._maximized = not self._maximized
 
     def close_window(self) -> None:
-        """标题栏 ✕：最小化到托盘（pywebview 6 的 Window 没有 close()，直接 hide）。"""
-        self._window.hide()
+        """标题栏 ✕：托盘化（销毁唯一窗口释放内存，重开时二次 start 重建）。"""
+        self._hide_to_tray()
 
     def move(self, x: int, y: int) -> None:
         """标题栏拖拽移动窗口（frameless 无原生拖拽，由前端手动驱动）。"""
@@ -141,6 +146,7 @@ class AppApi(ui_api.Api):
 
 def main() -> None:
     try:
+        import capture  # noqa: PLC0415 延迟导入：截屏依赖（mss）只在需要时进内存
         capture.cleanup_expired()  # 启动时按保留天数清理过期数据（每天一次）
     except Exception as e:  # noqa: BLE001
         _logger.error("启动数据清理失败: %s", e)
@@ -149,52 +155,78 @@ def main() -> None:
     except Exception as e:  # noqa: BLE001
         _logger.error("残留 WebView2 目录清理失败: %s", e)
 
-    api = AppApi(None)  # 窗口对象在 create_window 返回后回填
-    window = webview.create_window(
-        config.APP_TITLE,
-        str(resource_path("static/index.html")),
-        width=1280, height=800, min_size=(960, 600),
-        frameless=True,
-        background_color="#060a09",
-        hidden=True,  # 页面加载完成后再显示，避免空窗口闪烁
-        js_api=api,
-    )
-    api._window = window
+    api = AppApi(None)
 
-    def _enable_taskbar_minimize(window):
-        """frameless 被 WinForms 去掉 WS_MINIMIZEBOX 样式位，任务栏点击不会最小化，补回。"""
-        user32 = ctypes.windll.user32
-        hwnd = ctypes.c_void_p(window.native.Handle.ToInt64())
-        user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        user32.GetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
-        style = user32.GetWindowLongW(hwnd, -16)
-        user32.SetWindowLongW(hwnd, -16, style | 0x00020000)
+    reopen = threading.Event()  # 托盘「打开程序」→ 唤醒挂起的主循环重建窗口
 
-    def on_loaded():
-        _enable_taskbar_minimize(window)
-        window.show()
+    def _create_window(hidden: bool):
+        """创建主窗口（首次启动与零窗口重开共用同一套事件绑定）。"""
+        win = webview.create_window(
+            config.APP_TITLE,
+            str(resource_path("static/index.html")),
+            width=1280, height=800, min_size=(960, 600),
+            frameless=True,
+            background_color="#060a09",
+            hidden=hidden,
+            js_api=api,
+        )
+        api._window = win
+        api._maximized = False
 
-    window.events.loaded += on_loaded
+        def _enable_taskbar_minimize():
+            """frameless 被 WinForms 去掉 WS_MINIMIZEBOX 样式位，任务栏点击不会最小化，补回。"""
+            user32 = ctypes.windll.user32
+            hwnd = ctypes.c_void_p(win.native.Handle.ToInt64())
+            user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            user32.GetWindowLongW.restype = ctypes.c_long
+            user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+            style = user32.GetWindowLongW(hwnd, -16)
+            user32.SetWindowLongW(hwnd, -16, style | 0x00020000)
+
+        def on_loaded():
+            _enable_taskbar_minimize()
+            if getattr(win, "_pending_show", False):
+                win._pending_show = False
+                win.show()
+
+        win.events.loaded += on_loaded
+        return win
+
+    def hide_to_tray():
+        """托盘化的实际动作：直接销毁唯一窗口（零窗口方案，不预建隐藏窗口）。
+
+        最后一个窗口销毁后 webview.start() 返回、WebView2 全家桶进程全部退出，
+        主循环随即挂起等 reopen；重开由托盘「打开程序」二次调用 webview.start()。
+        """
+        win = window
+        if win is None:
+            return
+        try:
+            win.destroy()
+        except Exception as e:  # noqa: BLE001
+            _logger.error("托盘化销毁窗口失败: %s", e)
+
+    api.set_hide_to_tray(hide_to_tray)
 
     force_exit = False
     tray = None
 
-    def on_closing():
-        # 返回 False 取消关闭 → 最小化到托盘；托盘"退出程序"时放行
-        if force_exit:
-            return True
-        window.hide()
-        return False
-
     def on_show(icon=None, item=None):
-        # 只显示窗口，不碰任务状态：用户上次"停止"的选择必须被尊重（见 startup_enable）
-        window.show()
+        # 只显示窗口，不碰任务状态：用户上次"停止"的选择必须被尊重（见 startup_enable）。
+        win = window
+        if win is not None and not win.events.closed.is_set():
+            try:
+                win.show()  # 页面尚未加载完时由 on_loaded 兜底显示
+                return
+            except Exception as e:  # noqa: BLE001
+                _logger.error("显示窗口失败: %s", e)
+        reopen.set()  # 零窗口挂起中：唤醒主循环二次 start() 重建窗口
 
     def run_capture_once(force: bool = False):
         """立即执行一次截屏分析（后台线程），结果弹 toast。force=True 跳过去重与空闲检查。"""
         def run():
             try:
+                import capture  # noqa: PLC0415
                 code = capture.main(force=force)
                 msg = "记录完成" if code == 0 else "记录失败，详见 dailylog.log"
             except Exception as e:  # noqa: BLE001
@@ -283,9 +315,13 @@ def main() -> None:
             _logger.error("退出时停用定时任务失败: %s", e)
         if tray:
             tray.stop()
-        window.destroy()
-
-    window.events.closing += on_closing
+        reopen.set()  # 唤醒可能正挂起的主循环，使其看到 force_exit 后退出
+        win = window
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:  # noqa: BLE001
+                pass
 
     TRAY_RUNNING = "dailylog · 今日轨迹（定时记录运行中）"
     TRAY_STOPPED = "dailylog · 今日轨迹（定时记录已停止）"
@@ -339,6 +375,7 @@ def main() -> None:
         """测试模式：秒级循环截屏（任务计划最小只能 1 分钟）。清除设置即停。"""
         secs = config.SETTINGS.get("test_interval_seconds")
         _logger.info("测试模式：每 %s 秒截屏一次（设置页改回分钟即退出）", secs)
+        import capture  # noqa: PLC0415
         while True:
             secs = config.SETTINGS.get("test_interval_seconds")
             if not secs:
@@ -353,14 +390,32 @@ def main() -> None:
     if config.SETTINGS.get("test_interval_seconds"):
         threading.Thread(target=run_test_loop, daemon=True).start()
 
+    # 零窗口主循环：唯一窗口销毁后 start() 返回（pywebview 6 行为，源码确认），
+    # 挂起等 reopen；重开时二次调用 start() 属未文档化用法——windows 列表随窗口关闭
+    # 清空（winforms.py on_close）、uid 重新取 master、全局 HTTP server 与 WinForms
+    # 初始化均可复用，「关闭↔打开」循环稳定性需实测观察本日志
     # storage_path 固定 WebView2 数据目录：避免每次启动建随机临时目录（冷启动 + 磁盘残留）
-    webview.start(debug=False, storage_path=str(config.WEBVIEW_DIR))
+    # private_mode=False：默认 True 时 localStorage 不跨进程持久化，前端皮肤选择重启即丢
+    while not force_exit:
+        window = _create_window(hidden=True)  # 页面加载完成后再显示，避免空窗口闪烁
+        window._pending_show = True
+        webview.start(debug=False, storage_path=str(config.WEBVIEW_DIR), private_mode=False)
+        window = None
+        if force_exit:
+            break
+        reopen.clear()
+        _logger.info("零窗口挂起：WebView2 进程已全部退出，等待托盘「打开程序」唤醒")
+        reopen.wait()
+
+    _logger.info("主循环退出")
 
 
 if __name__ == "__main__":
     if "--capture" in sys.argv:
+        import capture
         sys.exit(capture.main())
     if "--usage" in sys.argv:
+        import usage
         sys.exit(usage.main())
     if "--diag" in sys.argv:  # 打包诊断：从控制台打印 get_config 与 NextRunTime 异常
         import json as _json

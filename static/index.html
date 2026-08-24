@@ -11,6 +11,12 @@
 <body>
 <div class="app">
 
+  <!-- 氛围光层（纯装饰） -->
+  <div class="glow glow-teal" aria-hidden="true"></div>
+  <div class="glow glow-red" aria-hidden="true"></div>
+  <!-- 底部模糊色块（纯装饰，各主题换色） -->
+  <div class="fx-blobs" aria-hidden="true"></div>
+
   <!-- 自定义标题栏（手动拖拽） -->
   <header class="titlebar" id="titlebar">
     <div class="tb-brand">dailylog<span class="tb-sub">今日轨迹</span></div>
@@ -26,28 +32,91 @@
   </header>
 
   <div class="layout">
-    <!-- 左侧常驻侧边栏 -->
+    <!-- 左侧图标竖栏 -->
     <aside class="sidebar">
       <nav class="side-nav">
-        <a class="side-item active" data-page="timeline"><span class="side-ico">◉</span>时间线</a>
-        <a class="side-item" data-page="usage"><span class="side-ico">◔</span>应用时长</a>
-        <a class="side-item" data-page="todos"><span class="side-ico">☑</span>待办</a>
-        <a class="side-item" data-page="reports"><span class="side-ico">▤</span>日报周报</a>
-        <a class="side-item" data-page="logs"><span class="side-ico">☰</span>日志</a>
-        <a class="side-item" data-page="settings"><span class="side-ico">⚙</span>设置</a>
+        <a class="side-item active" data-page="home" data-tip="今日总览"><span class="side-ico">✦</span><span class="side-txt">今日总览</span></a>
+        <a class="side-item" data-page="timeline" data-tip="时间线"><span class="side-ico">◉</span><span class="side-txt">时间线</span></a>
+        <a class="side-item" data-page="usage" data-tip="应用时长"><span class="side-ico">◔</span><span class="side-txt">应用时长</span></a>
+        <a class="side-item" data-page="todos" data-tip="待办"><span class="side-ico">☑</span><span class="side-txt">待办</span></a>
+        <a class="side-item" data-page="reports" data-tip="日报周报"><span class="side-ico">▤</span><span class="side-txt">日报周报</span></a>
+        <a class="side-item" data-page="logs" data-tip="日志"><span class="side-ico">☰</span><span class="side-txt">日志</span></a>
+        <a class="side-item" data-page="settings" data-tip="设置"><span class="side-ico">⚙</span><span class="side-txt">设置</span></a>
       </nav>
       <nav class="side-nav side-secondary">
-        <a class="side-item" id="side-privacy"><span class="side-ico">♡</span>隐私保护</a>
-        <a class="side-item" id="side-about"><span class="side-ico">i</span>关于</a>
+        <a class="side-item" id="side-privacy" data-tip="隐私保护"><span class="side-ico">♡</span><span class="side-txt">隐私保护</span></a>
+        <a class="side-item" id="side-about" data-tip="关于"><span class="side-ico">i</span><span class="side-txt">关于</span></a>
       </nav>
-      <div class="side-foot">定时记录 <span class="rec-dot" id="rec-dot"></span><span class="side-next" id="side-next"></span></div>
+      <div class="side-foot"><span class="rec-dot" id="rec-dot"></span><span class="side-next" id="side-next"></span></div>
     </aside>
 
     <!-- 主内容区 -->
     <main class="main">
 
+      <!-- ===== 今日总览页 ===== -->
+      <section class="page" id="page-home">
+        <div class="hero">
+          <span class="hero-title" id="home-greet">你好</span>
+          <span class="hero-date" id="home-date"></span>
+          <div class="hero-actions">
+            <button class="btn-ghost" id="home-capture">识别当前屏幕</button>
+            <button class="btn-primary" id="home-gen-day">↗ 生成今天日报</button>
+          </div>
+        </div>
+
+        <div class="ov-grid">
+          <!-- 专注时长环形 -->
+          <div class="ov-card ov-focus">
+            <svg class="ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="ring-bg" cx="50" cy="50" r="42"/>
+              <circle class="ring-fg" id="home-ring" cx="50" cy="50" r="42"/>
+            </svg>
+            <div>
+              <div class="focus-num" id="home-focus-num">–</div>
+              <div class="focus-sub">今日专注时长（估算）<br/>目标按 8h 工作日计</div>
+            </div>
+          </div>
+
+          <!-- 关键指标 -->
+          <div class="ov-card ov-stats">
+            <div class="mini"><div class="mini-v" id="home-count">–</div><div class="mini-l">今日记录</div></div>
+            <div class="mini"><div class="mini-v" id="home-active">–</div><div class="mini-l">活跃总时长</div></div>
+            <div class="mini mini-hot"><div class="mini-v" id="home-open-todos">–</div><div class="mini-l">待办未完成</div></div>
+            <div class="mini"><div class="mini-v" id="home-top-app">–</div><div class="mini-l">最常用应用</div></div>
+          </div>
+
+          <!-- 时间线预览 -->
+          <div class="ov-card ov-timeline">
+            <h3>最近记录 <span class="ov-more" data-goto="timeline">查看全部 →</span></h3>
+            <div id="home-tl"></div>
+          </div>
+
+          <!-- 应用时长 Top5 -->
+          <div class="ov-card ov-apps">
+            <h3>应用时长 Top 5 <span class="ov-more" data-goto="usage">详情 →</span></h3>
+            <div id="home-apps"></div>
+          </div>
+
+          <!-- 待办速览 -->
+          <div class="ov-card ov-todo">
+            <h3>待办速览 <span class="ov-more" data-goto="todos">全部待办 →</span></h3>
+            <div id="home-todo-list"></div>
+          </div>
+
+          <!-- 最新报告 -->
+          <div class="ov-card ov-report">
+            <div class="report-ico">▤</div>
+            <div class="report-info">
+              <div class="report-rt" id="home-report-name">还没有报告</div>
+              <div class="report-rs" id="home-report-meta">点右上角「生成今天日报」创建第一份</div>
+            </div>
+            <button class="btn-ghost report-go" id="home-report-open" hidden>打开</button>
+          </div>
+        </div>
+      </section>
+
       <!-- ===== 时间线页 ===== -->
-      <section class="page" id="page-timeline">
+      <section class="page" id="page-timeline" hidden>
         <div class="page-desc">查看全天工作活动轨迹，了解时间都花在了哪里</div>
 
         <div class="filter-bar">
@@ -187,6 +256,13 @@
 
         <div class="panel">
           <div class="panel-head">截图与记录</div>
+          <div class="settings-row">
+            <label for="theme-btn">界面皮肤</label>
+            <div class="select-wrap" id="theme-wrap">
+              <button class="select-btn" id="theme-btn">玻璃拟态<span class="caret">▾</span></button>
+              <div class="select-pop" id="theme-pop" hidden></div>
+            </div>
+          </div>
           <div class="settings-row">
             <label for="set-interval">截图间隔</label>
             <div class="select-wrap" id="interval-wrap">

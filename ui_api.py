@@ -353,6 +353,7 @@ class Api:
             "enter_capture_interval": config.SETTINGS.get("enter_capture_interval", 15),
             "enter_interval_choices": list(config.ENTER_INTERVAL_CHOICES),
             "usage_enabled": bool(config.SETTINGS.get("usage_enabled", True)),
+            "theme": config.SETTINGS.get("theme", "glass"),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
             "has_analyze_key": bool(config.ANALYZE_API_KEY),
             "has_summary_key": bool(config.DEEPSEEK_API_KEY),
@@ -442,6 +443,14 @@ class Api:
         config.DEDUP_ENABLED = bool(enabled)
         return {"ok": True, "dedup_enabled": bool(enabled)}
 
+    def set_theme(self, theme: str) -> dict:
+        """界面皮肤：glass=玻璃拟态 / paper=纸面编辑部 / journal=暖光手账 /
+        terminal=墨绿终端 / abyss=深海蓝调 / film=胶片暗房 / mint=薄荷汽水 / sakura=樱吹雪。"""
+        if theme not in ("glass", "paper", "journal", "terminal", "abyss", "film", "mint", "sakura"):
+            return {"ok": False, "error": f"未知皮肤: {theme}"}
+        _write_settings(theme=theme)
+        return {"ok": True, "theme": theme}
+
     def set_enter_capture(self, enabled: bool, seconds: int) -> dict:
         """回车键快速记录：全局监听开关 + 间隔内只记录第一次（秒）。"""
         seconds = int(seconds)
@@ -458,7 +467,7 @@ class Api:
     EXPORT_SETTING_KEYS = (
         "interval_minutes", "report_name", "idle_enabled", "idle_minutes",
         "retention_days", "recording_enabled", "dedup_enabled",
-        "enter_capture_enabled", "enter_capture_interval", "usage_enabled",
+        "enter_capture_enabled", "enter_capture_interval", "usage_enabled", "theme",
     )
 
     def export_data(self, path: str) -> dict:

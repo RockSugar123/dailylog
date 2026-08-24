@@ -15,6 +15,7 @@ const MOCK_RECORDS = [
 let bridgeReady = false;
 window.addEventListener("pywebviewready", () => {
   bridgeReady = true;
+  loadHome();
   loadTimeline();
   loadSettings();
   if (!document.getElementById("page-reports").hidden) loadReports();
@@ -64,6 +65,224 @@ const CAT_COLORS = {
 };
 function catColor(label) { return CAT_COLORS[label] || "#6b7280"; }
 
+/* ===================== 皮肤（glass=玻璃拟态 / paper=纸面编辑部 / journal=暖光手账 /
+ * terminal=墨绿终端 / abyss=深海蓝调 / film=胶片暗房 / mint=薄荷汽水 / sakura=樱吹雪） ===================== */
+
+const THEMES = {
+  glass: "玻璃拟态", paper: "纸面编辑部", journal: "暖光手账",
+  terminal: "墨绿终端", abyss: "深海蓝调", film: "胶片暗房",
+  mint: "薄荷汽水", sakura: "樱吹雪",
+};
+function applyTheme(theme) {
+  for (const key of Object.keys(THEMES)) {
+    if (key !== "glass") document.body.classList.toggle("theme-" + key, theme === key);
+  }
+  FX.setTheme(theme);
+  try { localStorage.setItem("dailylog-theme", theme); } catch (_) { /* 隐私模式等场景下不可写，忽略 */ }
+}
+
+/* 统一特效引擎：按皮肤渲染常驻环境粒子 + 鼠标点击迸发特效。
+ * 画布 z-index 95（内容之上、弹窗之下），pointer-events 穿透；
+ * prefers-reduced-motion 下整体禁用。 */
+const FX = (() => {
+  let cv = null, ctx = null, rafId = 0, parts = [], bursts = [], theme = "glass", running = false;
+  const GLYPHS = "01<>/#$;:";
+  const PINKS = [[255, 183, 197], [255, 205, 220], [250, 160, 185], [255, 225, 232], [244, 143, 177]];
+  const PASTELS = ["255,154,108", "168,213,186", "245,227,163", "125,200,235", "242,136,171"];
+  const EMBERS = ["255,140,80", "255,90,90", "255,180,120"];
+  /* 各皮肤环境粒子数量（sakura 按窗口宽度动态收缩） */
+  const N = { glass: 14, paper: 6, journal: 10, terminal: 16, abyss: 10, film: 14, mint: 9, sakura: 38 };
+
+  function initPart(w, h, any) {
+    if (theme === "sakura") return { x: Math.random() * w, y: any ? Math.random() * h : -20 - Math.random() * h * .25, s: 5 + Math.random() * 6, vy: .45 + Math.random() * 1.05, sw: .6 + Math.random() * 1.6, ph: Math.random() * 6.28, rot: Math.random() * 6.28, vr: (Math.random() - .5) * .05, c: PINKS[(Math.random() * PINKS.length) | 0], o: .5 + Math.random() * .35 };
+    if (theme === "glass") return { x: Math.random() * w, y: any ? Math.random() * h : h + 6, vy: .18 + Math.random() * .42, r: .8 + Math.random() * 1.6, ph: Math.random() * 6.28, fl: 2 + Math.random() * 3, c: EMBERS[(Math.random() * 3) | 0] };
+    if (theme === "paper") return { x: Math.random() * w, y: Math.random() * h, vx: .06 + Math.random() * .12, vy: .04 + Math.random() * .09, r: .8 + Math.random() * .9, a: .04 + Math.random() * .06 };
+    if (theme === "journal") return { x: Math.random() * w, y: any ? Math.random() * h : h + 8, vy: .2 + Math.random() * .35, r: 2 + Math.random() * 3, ph: Math.random() * 6.28, c: PASTELS[(Math.random() * PASTELS.length) | 0], a: .12 + Math.random() * .1 };
+    if (theme === "terminal") return { x: Math.random() * w, y: any ? Math.random() * h : -12, vy: .25 + Math.random() * .5, ch: GLYPHS[(Math.random() * GLYPHS.length) | 0], a: .14 + Math.random() * .22 };
+    if (theme === "abyss") return { x: Math.random() * w, y: any ? Math.random() * h : h + 8, vy: .3 + Math.random() * .5, r: 1.5 + Math.random() * 2.5, ph: Math.random() * 6.28 };
+    if (theme === "film") return { x: Math.random() * w, y: any ? Math.random() * h : -6, vy: .12 + Math.random() * .3, r: .8 + Math.random() * 1.8, big: Math.random() < .18, ph: Math.random() * 6.28, a: .05 + Math.random() * .13 };
+    return { x: Math.random() * w, y: any ? Math.random() * h : h + 8, vy: .25 + Math.random() * .4, r: 2 + Math.random() * 3, ph: Math.random() * 6.28 }; /* mint */
+  }
+  function petalPath(s) {
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.bezierCurveTo(s * .85, -s * .45, s * .62, s * .62, 0, s);
+    ctx.bezierCurveTo(-s * .62, s * .62, -s * .85, -s * .45, 0, -s);
+    ctx.quadraticCurveTo(-s * .18, -s * .55, 0, -s * .72);
+    ctx.quadraticCurveTo(s * .18, -s * .55, 0, -s);
+    ctx.fill();
+  }
+  function stepPart(p, w, h) {
+    if (theme === "sakura") {
+      p.ph += .008 + p.sw * .004; p.x += Math.sin(p.ph) * p.sw * .6; p.y += p.vy; p.rot += p.vr;
+      if (p.y > h + 24 || p.x < -40 || p.x > w + 40) Object.assign(p, initPart(w, h, false));
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot + Math.sin(p.ph) * .45);
+      ctx.fillStyle = `rgba(${p.c[0]},${p.c[1]},${p.c[2]},${p.o})`;
+      petalPath(p.s); ctx.restore();
+    } else if (theme === "glass") {
+      p.y -= p.vy; p.ph += .02; p.x += Math.sin(p.ph * .7) * .2;
+      if (p.y < -8) Object.assign(p, initPart(w, h, false));
+      const flick = .5 + .5 * Math.sin(p.ph * p.fl * 6);
+      ctx.fillStyle = `rgba(${p.c},${.18 + .4 * flick})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    } else if (theme === "paper") {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x > w + 6) p.x = -6;
+      if (p.y > h + 6) p.y = -6;
+      ctx.fillStyle = `rgba(60,50,40,${p.a})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    } else if (theme === "journal") {
+      p.y -= p.vy; p.x += Math.sin(p.ph += .012) * .35;
+      if (p.y < -10) Object.assign(p, initPart(w, h, false));
+      ctx.fillStyle = `rgba(${p.c},${p.a})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    } else if (theme === "terminal") {
+      p.y += p.vy;
+      if (p.y > h + 12) Object.assign(p, initPart(w, h, false));
+      ctx.fillStyle = `rgba(102,220,150,${p.a})`; ctx.font = "10px Consolas,monospace"; ctx.fillText(p.ch, p.x, p.y);
+    } else if (theme === "abyss") {
+      p.y -= p.vy; p.x += Math.sin(p.ph += .01) * .3;
+      if (p.y < -10) Object.assign(p, initPart(w, h, false));
+      ctx.strokeStyle = "rgba(140,200,255,.38)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.stroke();
+    } else if (theme === "film") {
+      p.y += p.vy; p.x += Math.sin(p.ph += .006) * .2;
+      if (p.y > h + 8) Object.assign(p, initPart(w, h, false));
+      ctx.fillStyle = `rgba(255,225,180,${p.big ? .05 : p.a})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.big ? p.r * 3 : p.r, 0, 7); ctx.fill();
+    } else { /* mint */
+      p.y -= p.vy; p.x += Math.sin(p.ph += .012) * .35;
+      if (p.y < -10) Object.assign(p, initPart(w, h, false));
+      ctx.fillStyle = "rgba(23,199,143,.28)";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    }
+  }
+  function drawBurst(x, y, t) {
+    const f = 1 - t;
+    if (theme === "terminal") {
+      const s1 = 12 + t * 36;
+      ctx.strokeStyle = `rgba(66,217,140,${f})`; ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - s1, y - s1, s1 * 2, s1 * 2);
+      const s2 = 6 + Math.max(0, t - .18) * 44;
+      ctx.strokeStyle = `rgba(66,217,140,${f * .6})`;
+      ctx.strokeRect(x - s2, y - s2, s2 * 2, s2 * 2);
+      ctx.fillStyle = `rgba(130,240,180,${f})`;
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .4; ctx.fillRect(x + Math.cos(a) * t * 34 - 1.5, y + Math.sin(a) * t * 34 - 1.5, 3, 3); }
+    } else if (theme === "abyss") {
+      for (let i = 0; i < 3; i++) {
+        ctx.strokeStyle = `rgba(120,200,255,${f * (.85 - i * .22)})`; ctx.lineWidth = 1.6 - i * .4;
+        ctx.beginPath(); ctx.arc(x, y, 5 + i * 8 + t * (40 + i * 16), 0, 7); ctx.stroke();
+      }
+    } else if (theme === "film") {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 20 + t * 56);
+      g.addColorStop(0, `rgba(255,214,160,${f * .3})`); g.addColorStop(1, "rgba(255,214,160,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 20 + t * 56, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(255,200,140,${f * .55})`;
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .8; ctx.beginPath(); ctx.arc(x + Math.cos(a) * t * 40, y + Math.sin(a) * t * 40, 2.4, 0, 7); ctx.fill(); }
+    } else if (theme === "mint") {
+      ctx.strokeStyle = `rgba(14,170,125,${f})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(x, y, 4 + t * 30, 0, 7); ctx.stroke();
+      ctx.fillStyle = `rgba(23,199,143,${f})`;
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .3; ctx.beginPath(); ctx.arc(x + Math.cos(a) * t * 26, y + Math.sin(a) * t * 26 - t * 6, 2.2, 0, 7); ctx.fill(); }
+    } else if (theme === "sakura") {
+      ctx.strokeStyle = `rgba(244,143,177,${f * .6})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 6 + t * 30, 0, 7); ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4 + .3, d = t * (26 + (i % 3) * 10);
+        ctx.save(); ctx.translate(x + Math.cos(a) * d, y + Math.sin(a) * d - t * 8);
+        ctx.rotate(t * 3 + i); ctx.fillStyle = `rgba(${PINKS[i % PINKS.length].join(",")},${f})`;
+        petalPath(4.5); ctx.restore();
+      }
+    } else if (theme === "glass") {
+      ctx.strokeStyle = `rgba(255,107,74,${f * .7})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(x, y, 4 + t * 28, 0, 7); ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4 + .2, d = t * (30 + (i % 2) * 10);
+        ctx.fillStyle = `rgba(${EMBERS[i % 3]},${f})`;
+        ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d - t * 10, 1.8, 0, 7); ctx.fill();
+      }
+    } else if (theme === "paper") {
+      const r = 3 + t * 15;
+      ctx.fillStyle = `rgba(45,38,32,${f * .5})`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+      for (let i = 0; i < 5; i++) { const a = i * 1.256 + .5; ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * .75, y + Math.sin(a) * r * .75, r * .45, 0, 7); ctx.fill(); }
+      ctx.strokeStyle = `rgba(45,38,32,${f * .35})`; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, 6 + t * 30, 0, 7); ctx.stroke();
+    } else { /* journal */
+      ctx.strokeStyle = `rgba(255,179,138,${f * .6})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(x, y, 5 + t * 26, 0, 7); ctx.stroke();
+      for (let i = 0; i < 7; i++) {
+        const a = i * (Math.PI * 2 / 7) + .4, d = t * (24 + (i % 3) * 8);
+        ctx.fillStyle = `rgba(${PASTELS[i % PASTELS.length]},${f * .9})`;
+        ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d - t * 6, 2.6, 0, 7); ctx.fill();
+      }
+    }
+  }
+  function size() {
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+    cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function count() { return theme === "sakura" ? Math.round(Math.min(N.sakura, innerWidth / 34)) : N[theme]; }
+  function reseed() {
+    parts = Array.from({ length: count() }, () => initPart(innerWidth, innerHeight, true));
+    bursts = [];
+  }
+  function frame() {
+    if (!cv) return;
+    const w = innerWidth, h = innerHeight, now = performance.now();
+    ctx.clearRect(0, 0, w, h);
+    for (const p of parts) stepPart(p, w, h);
+    for (let i = bursts.length - 1; i >= 0; i--) {
+      const t = (now - bursts[i].t) / 700;
+      if (t >= 1) { bursts.splice(i, 1); continue; }
+      drawBurst(bursts[i].x, bursts[i].y, t);
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+  function start() {
+    if (running || document.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!cv) {
+      cv = document.createElement("canvas");
+      cv.id = "fx-layer";
+      cv.style.cssText = "position:fixed;left:0;top:0;z-index:95;pointer-events:none";
+      document.body.appendChild(cv);
+      ctx = cv.getContext("2d");
+      window.addEventListener("resize", size);
+      window.addEventListener("pointerdown", (e) => {
+        if (e.button === 0 && running) bursts.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+      });
+    }
+    size();
+    running = true;
+    reseed();
+    rafId = requestAnimationFrame(frame);
+  }
+  function stop() {
+    if (!running) return;
+    cancelAnimationFrame(rafId); running = false;
+    if (ctx && cv) ctx.clearRect(0, 0, cv.width, cv.height);
+  }
+  return {
+    setTheme(t) {
+      theme = t;
+      start();
+      if (running) reseed();
+    },
+    stop() { stop(); },
+    resume() { start(); },
+  };
+})();
+/* 启动即按上次选择上皮肤，避免先闪一帧暗色玻璃 */
+try { applyTheme(localStorage.getItem("dailylog-theme") || "glass"); } catch (_) { applyTheme("glass"); }
+/* 窗口隐藏（托盘化/最小化）时停掉粒子 rAF 循环，避免后台空转撑大渲染/GPU 进程内存 */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) FX.stop();
+  else FX.resume();
+});
+
 /* ===================== 通用 UI ===================== */
 
 let toastTimer = null;
@@ -73,6 +292,23 @@ function toast(msg, ms = 2600) {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+/* 数字滚动（GSAP 式 easeOut）：仅对「纯数字 + 非数字后缀」生效，
+ * 形如 "2h30m" 的复合值直接原样显示，避免中间态错乱 */
+function countUp(el, finalText) {
+  const s = String(finalText);
+  const m = s.match(/^(\d+)(\D*)$/);
+  if (!m || matchMedia("(prefers-reduced-motion: reduce)").matches) { el.textContent = s; return; }
+  const target = parseInt(m[1], 10);
+  if (!target) { el.textContent = s; return; }
+  const t0 = performance.now(), dur = 600;
+  const tick = (t) => {
+    const p = Math.min((t - t0) / dur, 1);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))) + m[2];
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 const backdrop = document.getElementById("modal-backdrop");
@@ -166,7 +402,7 @@ document.getElementById("win-close").addEventListener("click", () => apiCall("cl
 
 /* ===================== 页面切换 ===================== */
 
-const PAGES = { timeline: "page-timeline", usage: "page-usage", todos: "page-todos", reports: "page-reports", logs: "page-logs", settings: "page-settings" };
+const PAGES = { home: "page-home", timeline: "page-timeline", usage: "page-usage", todos: "page-todos", reports: "page-reports", logs: "page-logs", settings: "page-settings" };
 
 document.querySelectorAll(".side-item[data-page]").forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.page));
@@ -174,6 +410,7 @@ document.querySelectorAll(".side-item[data-page]").forEach((item) => {
 function switchPage(name) {
   document.querySelectorAll(".side-item[data-page]").forEach((i) => i.classList.toggle("active", i.dataset.page === name));
   Object.entries(PAGES).forEach(([key, id]) => { document.getElementById(id).hidden = key !== name; });
+  if (name === "home") loadHome();
   if (name === "usage") loadUsage();
   if (name === "todos") loadTodos();
   if (name === "reports") loadReports();
@@ -181,20 +418,149 @@ function switchPage(name) {
   if (name === "settings") loadSettings();
 }
 
+/* ===================== 今日总览页 ===================== */
+
+async function loadHome() {
+  const today = todayStr();
+  const [records, todosList, usageR, reports] = await Promise.all([
+    apiCall("get_records_range", today, today),
+    apiCall("get_todos"),
+    apiCall("get_usage_stats", "day", today),
+    apiCall("list_reports"),
+  ]);
+  renderHome(records || MOCK_RECORDS, todosList || [], usageR, reports || []);
+}
+
+function renderHome(records, todosList, usageR, reports) {
+  // 问候语 + 日期
+  const h = new Date().getHours();
+  document.getElementById("home-greet").textContent =
+    h < 6 ? "夜深了" : h < 12 ? "上午好" : h < 14 ? "中午好" : h < 18 ? "下午好" : "晚上好";
+  document.getElementById("home-date").textContent =
+    `${todayStr()} ${WEEK[new Date().getDay()]} · 记录 ${records.length} 条`;
+
+  // 专注时长（复用时间线的间隔估算法，目标按 8h 工作日）
+  const totalMin = records.reduce((sum, _, i) => sum + recordDuration(records, i), 0);
+  document.getElementById("home-focus-num").textContent = fmtMin(totalMin);
+  const CIRC = 2 * Math.PI * 42;
+  const ring = document.getElementById("home-ring");
+  ring.style.strokeDasharray = CIRC;
+  requestAnimationFrame(() => {
+    ring.style.strokeDashoffset = CIRC * (1 - Math.min(totalMin / 480, 1));
+  });
+
+  // 关键指标
+  countUp(document.getElementById("home-count"), `${records.length} 条`);
+  countUp(document.getElementById("home-active"), fmtMin(totalMin));
+  const openN = todosList.filter((it) => it.status === "未开始" || it.status === "进行中").length;
+  countUp(document.getElementById("home-open-todos"), `${openN} 项`);
+  document.getElementById("home-top-app").textContent =
+    usageR && usageR.ok && usageR.apps.length ? appName(usageR.apps[0].app) : "–";
+
+  // 时间线预览（最近 5 条，最新在上）
+  const tlBox = document.getElementById("home-tl");
+  if (!records.length) {
+    tlBox.innerHTML = '<div class="home-empty">今天还没有记录。<br/>自动记录会替你补上接下来的每一分钟。</div>';
+  } else {
+    tlBox.innerHTML = [...records].reverse().slice(0, 5).map((r) => {
+      const color = catColor(r.label);
+      return `
+      <div class="home-tl-item">
+        <span class="home-tl-time">${fmtHM(r.ts)}</span>
+        <span class="home-tl-bar" style="background:${color}"></span>
+        <div class="home-tl-body">
+          <div class="home-tl-text">${escapeHtml(r.summary || "")}</div>
+          <div class="home-tl-meta">${escapeHtml(r.label || "其他")}${r.apps && r.apps.length ? " · " + escapeHtml(r.apps.join("、")) : ""}</div>
+        </div>
+      </div>`;
+    }).join("");
+    tlBox.querySelectorAll(".home-tl-item").forEach((el) => {
+      el.addEventListener("click", () => switchPage("timeline"));
+    });
+  }
+
+  // 应用时长 Top5（相对最大值条形）
+  const appsBox = document.getElementById("home-apps");
+  const topApps = usageR && usageR.ok ? usageR.apps.slice(0, 5) : [];
+  if (!topApps.length) {
+    appsBox.innerHTML = '<div class="home-empty">暂无应用时长采样数据。</div>';
+  } else {
+    const max = Math.max(...topApps.map((a) => a.minutes), 1);
+    appsBox.innerHTML = topApps.map((a) => `
+      <div class="app-row">
+        <div class="app-top"><b title="${escapeHtml(a.app)}">${escapeHtml(appName(a.app))}</b><span>${fmtMin(a.minutes)} · ${a.pct}%</span></div>
+        <div class="hbar-track-sm"><div class="hbar-fill-sm" data-w="${(a.minutes / max * 100).toFixed(1)}%"></div></div>
+      </div>`).join("");
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      appsBox.querySelectorAll(".hbar-fill-sm").forEach((b) => { b.style.width = b.dataset.w; });
+    }));
+  }
+
+  // 待办速览（未完成在前，最多 4 条，点击勾选切换完成）
+  const todoBox = document.getElementById("home-todo-list");
+  const PRIO_PILL = { "高": ["rgba(255,90,90,.18)", "#ff9c9c"], "中": ["rgba(255,210,127,.15)", "#ffd27f"] };
+  const ordered = [...todosList.filter((it) => it.status !== "已完成" && it.status !== "归档"),
+                   ...todosList.filter((it) => it.status === "已完成")].slice(0, 4);
+  if (!ordered.length) {
+    todoBox.innerHTML = '<div class="home-empty">没有待办，轻装上阵。</div>';
+  } else {
+    todoBox.innerHTML = ordered.map((it) => {
+      const done = it.status === "已完成";
+      const pill = PRIO_PILL[it.priority];
+      return `
+      <div class="home-todo-item${done ? " done" : ""}" data-id="${escapeHtml(it.id)}">
+        <span class="home-todo-check">✓</span>
+        <span class="home-todo-text">${mdInline(it.text)}</span>
+        ${pill ? `<span class="prio-pill" style="background:${pill[0]};color:${pill[1]}">${escapeHtml(it.priority)}</span>` : ""}
+      </div>`;
+    }).join("");
+    todoBox.querySelectorAll(".home-todo-item").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const done = el.classList.contains("done");
+        const r = await apiCall("set_todo_status", el.dataset.id, done ? "未开始" : "已完成");
+        if (r && r.ok) loadHome(); else toast((r && r.error) || "更新失败");
+      });
+    });
+  }
+
+  // 最新报告卡
+  const openBtn = document.getElementById("home-report-open");
+  if (reports.length) {
+    const latest = reports[0];
+    document.getElementById("home-report-name").textContent = latest.name.replace(/\.md$/, "");
+    document.getElementById("home-report-meta").textContent = `生成于 ${latest.mtime}`;
+    openBtn.hidden = false;
+    openBtn.onclick = async () => {
+      const r = await apiCall("get_report", latest.name);
+      if (r && r.ok) openModal(r.name, `<div class="md-body">${mdToHtml(r.content)}</div>`);
+      else toast((r && r.error) || "读取失败");
+    };
+  } else {
+    document.getElementById("home-report-name").textContent = "还没有报告";
+    document.getElementById("home-report-meta").textContent = "点右上角「生成今天日报」创建第一份";
+    openBtn.hidden = true;
+  }
+}
+
+// 总览卡片右上角的跳转链接（data-goto → switchPage）
+document.querySelectorAll(".ov-more[data-goto]").forEach((el) => {
+  el.addEventListener("click", () => switchPage(el.dataset.goto));
+});
+
 /* ===================== 日志页 ===================== */
 
 async function loadLogs() {
-  const r = await apiCall("get_logs");
   const el = document.getElementById("logs-list");
   const count = document.getElementById("logs-count");
+  el.innerHTML = '<div class="skeleton" style="height:160px"></div>';
+  count.textContent = "";
+  const r = await apiCall("get_logs");
   if (!r || !r.ok) {
-    el.innerHTML = `<div class="logs-empty">读取失败：${escapeHtml(r ? r.error : "无响应")}</div>`;
-    count.textContent = "";
+    el.innerHTML = `<div class="logs-empty"><div class="empty-icon">⚠</div>读取失败：${escapeHtml(r ? r.error : "无响应")}<div class="empty-hint">请检查后端连接</div></div>`;
     return;
   }
   if (!r.logs.length) {
-    el.innerHTML = '<div class="logs-empty">暂无日志</div>';
-    count.textContent = "";
+    el.innerHTML = '<div class="logs-empty"><div class="empty-icon">☰</div>暂无日志<div class="empty-hint">运行日志会在操作过程中自动生成</div></div>';
     return;
   }
   count.textContent = `共 ${r.logs.length} 条`;
@@ -221,6 +587,7 @@ function applyRange(start, end) {
 }
 
 async function loadTimeline() {
+  document.getElementById("timeline").innerHTML = '<div class="skeleton" style="height:180px"></div>';
   const records = (await apiCall("get_records_range", rangeStart, rangeEnd)) || MOCK_RECORDS;
   timelineRecords = records.slice().sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
   lastTimelineSig = sigOf(timelineRecords);
@@ -251,13 +618,13 @@ function recordDuration(records, i) {
 
 function renderStats() {
   const n = timelineRecords.length;
-  document.getElementById("st-count").textContent = n;
+  countUp(document.getElementById("st-count"), n);
   const el = document.getElementById("st-range");
   const focus = document.getElementById("st-focus");
   if (!n) { el.textContent = "–"; focus.textContent = "–"; return; }
   el.textContent = `${fmtHM(timelineRecords[0].ts)} — ${fmtHM(timelineRecords[n - 1].ts)}`;
   const totalMin = timelineRecords.reduce((sum, _, i) => sum + recordDuration(timelineRecords, i), 0);
-  focus.textContent = totalMin >= 60 ? `${Math.floor(totalMin / 60)}h` : `${Math.floor(totalMin)}m`;
+  countUp(focus, totalMin >= 60 ? `${Math.floor(totalMin / 60)}h` : `${Math.floor(totalMin)}m`);
 }
 
 function renderCats() {
@@ -287,7 +654,7 @@ function renderTimeline() {
   const desc = document.getElementById("tl-desc").checked;
   document.getElementById("tl-count").textContent = timelineRecords.length ? `${timelineRecords.length} 条` : "";
   if (!timelineRecords.length) {
-    box.innerHTML = `<div class="tl-empty">这个时间段还没有记录。<br>放轻松，自动记录会替你补上接下来的每一分钟。</div>`;
+    box.innerHTML = `<div class="tl-empty"><div class="empty-icon">◉</div>这个时间段还没有记录。<div class="empty-hint">放轻松，自动记录会替你补上接下来的每一分钟。</div></div>`;
     return;
   }
   // 按天分组，日期降序（最新在前）；天内按开关决定顺序
@@ -348,7 +715,7 @@ function openRecordModal(rec) {
 let usageScope = "day";
 let usageDate = todayStr();
 let usageChart = "bar";
-const USAGE_COLORS = ["#4cc49a", "#6e9eea", "#f5b94c", "#e07bd0", "#5ad1e0", "#ef6f6f", "#8b7cf5", "#7dd08a"];
+const USAGE_COLORS = ["#ff6b4a", "#6e9eea", "#f5b94c", "#e07bd0", "#5ad1e0", "#ef6f6f", "#8b7cf5", "#ff9a76"];
 
 /* 进程名 → 中文名（展示层映射；未知进程直接显示进程名） */
 const APP_NAMES = {
@@ -387,7 +754,7 @@ function pieSlice(cx, cy, r, a0, a1, color, title) {
   const x0 = cx + r * Math.cos(rad(a0)), y0 = cy + r * Math.sin(rad(a0));
   const x1 = cx + r * Math.cos(rad(a1)), y1 = cy + r * Math.sin(rad(a1));
   const large = a1 - a0 > 180 ? 1 : 0;
-  return `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${large} 1 ${x1},${y1} Z" fill="${color}"><title>${escapeHtml(title)}</title></path>`;
+  return `<path shape-rendering="geometricPrecision" d="M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${large} 1 ${x1.toFixed(2)},${y1.toFixed(2)} Z" fill="${color}" stroke="#121014" stroke-width="2.5" stroke-linejoin="round"><title>${escapeHtml(title)}</title></path>`;
 }
 
 /* 柱状图 = 横向条形（应用名 | 条形按最大值比例 | 数值）；饼图 = SVG 实心饼 + 右侧图例 */
@@ -406,12 +773,12 @@ function renderUsageChart(apps) {
     const slices = apps.map((a, i) => {
       const a0 = acc * 3.6, a1 = (acc + a.pct) * 3.6;
       acc += a.pct;
-      return pieSlice(110, 110, 96, a0, a1, USAGE_COLORS[i % USAGE_COLORS.length],
+      return pieSlice(250, 250, 220, a0, a1, USAGE_COLORS[i % USAGE_COLORS.length],
         `${appName(a.app)} ${fmtMin(a.minutes)} · ${a.pct}%`);
     });
     area.innerHTML = `
       <div class="pie-layout">
-        <svg class="pie" viewBox="0 0 220 220">${slices.join("")}</svg>
+        <svg class="pie" viewBox="0 0 500 500" shape-rendering="geometricPrecision">${slices.join("")}</svg>
         <div class="pie-legend">` + apps.map((a, i) => `
           <div class="pie-legend-item">
             <span class="pie-swatch" style="background:${USAGE_COLORS[i % USAGE_COLORS.length]}"></span>
@@ -441,6 +808,7 @@ function renderUsageTable(apps) {
 }
 
 function fmtMin(min) {
+  min = Math.round(min); // 间隔估算是浮点数（如 29.9833…），显示一律取整
   if (min >= 60) {
     const h = Math.floor(min / 60), m = min % 60;
     return m ? `${h}h${m}m` : `${h}h`;
@@ -462,6 +830,9 @@ function renderUsageBuckets(buckets, totalMin) {
 
 async function loadUsage() {
   document.getElementById("usage-date").value = usageDate;
+  document.getElementById("chart-area").innerHTML = '<div class="skeleton" style="height:160px"></div>';
+  document.getElementById("usage-tbody").innerHTML = '<div class="skeleton" style="height:120px"></div>';
+  document.getElementById("usage-buckets").innerHTML = '<div class="skeleton" style="height:80px"></div>';
   const r = await apiCall("get_usage_stats", usageScope, usageDate);
   const total = document.getElementById("usage-total");
   const days = document.getElementById("usage-days");
@@ -470,15 +841,15 @@ async function loadUsage() {
   const topHour = document.getElementById("usage-top-hour");
   const top20 = r && r.ok ? r.apps.slice(0, 20) : [];
   if (!r || !r.ok) {
-    document.getElementById("chart-area").innerHTML = `<div class="tl-empty">${escapeHtml(r ? r.error : "未连接到后端")}</div>`;
+    document.getElementById("chart-area").innerHTML = `<div class="tl-empty"><div class="empty-icon">◔</div>${escapeHtml(r ? r.error : "未连接到后端")}<div class="empty-hint">请检查后端连接</div></div>`;
     renderUsageTable([]);
     total.textContent = "–"; days.textContent = "–"; apps.textContent = "–";
     topApp.textContent = "–"; topHour.textContent = "–";
     return;
   }
-  total.textContent = fmtMin(r.total_min);
-  days.textContent = `${r.days} 天`;
-  apps.textContent = r.apps.length;
+  countUp(total, fmtMin(r.total_min));
+  countUp(days, `${r.days} 天`);
+  countUp(apps, r.apps.length);
   if (!r.apps.length) {
     document.getElementById("chart-area").innerHTML = "";
     document.getElementById("usage-buckets").innerHTML = "";
@@ -529,14 +900,16 @@ async function generateReport(kind) {
   if (!r.ok) { toast(r.error); return; }
   openModal(kind === "day" ? "今日日报" : "本周周报", `<div class="md-body">${mdToHtml(r.content)}</div>`, `保存位置：${escapeHtml(r.path)}`);
   loadReports();
+  if (!document.getElementById("page-home").hidden) loadHome();  // 总览页的最新报告卡跟随刷新
 }
 
 async function loadReports() {
   const list = document.getElementById("report-list");
+  list.innerHTML = '<div class="skeleton" style="height:120px"></div>';
   const items = (await apiCall("list_reports")) || [];
   document.getElementById("report-count").textContent = items.length ? `${items.length} 份` : "";
   if (!items.length) {
-    list.innerHTML = `<div class="report-empty">还没有生成过报告。<br>点上面的按钮，用今天的轨迹写第一份日报。</div>`;
+    list.innerHTML = `<div class="report-empty"><div class="empty-icon">▤</div>还没有生成过报告。<div class="empty-hint">点上面的按钮，用今天的轨迹写第一份日报。</div></div>`;
     return;
   }
   list.innerHTML = items.map((x) => `
@@ -598,6 +971,10 @@ async function loadSettings() {
     interval_minutes: 10, interval_choices: [5, 10, 15, 30, 60], recording_enabled: true,
   };
   currentInterval = cfg.interval_minutes || 10;
+  // 皮肤以后端 settings.json 为准（localStorage 在 private_mode 下重启会丢，只作首帧兜底）
+  if (cfg.theme) applyTheme(cfg.theme);
+  setupSelect("theme-pop", "theme-btn", Object.keys(THEMES),
+    (v) => THEMES[v], (v) => { applyTheme(v); apiCall("set_theme", v); }, cfg.theme || "glass");
   setupSelect("interval-pop", "interval-btn", cfg.interval_choices || [5, 10, 15, 30, 60],
     (m) => `每 ${m} 分钟`, (v) => { currentInterval = Number(v); }, currentInterval);
   idleEnabled = cfg.idle_enabled !== false;
@@ -639,10 +1016,11 @@ async function refreshStatus() {
   const isFast = refreshTimer && refreshTimer._fast === true;
   if (wantFast && !isFast) { scheduleRefresh(10000); refreshTimer._fast = true; }
   else if (!wantFast && isFast) { scheduleRefresh(60000); refreshTimer._fast = false; }
-  updateStatus(cfg);
-  if (!document.getElementById("page-logs").hidden) loadLogs();  // 日志页可见时跟随刷新
-  if (!document.getElementById("page-usage").hidden) loadUsage();  // 应用时长页可见时跟随刷新
-}
+   updateStatus(cfg);
+   if (!document.getElementById("page-logs").hidden) loadLogs();  // 日志页可见时跟随刷新
+   if (!document.getElementById("page-usage").hidden) loadUsage();  // 应用时长页可见时跟随刷新
+   if (!document.getElementById("page-home").hidden) loadHome();  // 总览页可见时跟随刷新（新记录/待办变化）
+ }
 scheduleRefresh(60000);
 
 /* 自定义下拉（原生 select 弹出层白底不可控）。值不自动转数字：字符串值（如待办状态）
@@ -720,6 +1098,7 @@ const TODO_STATUSES = ["未开始", "进行中", "已完成", "归档"];
 const PRIO_COLORS = { "高": "#ef4444", "中": "#f59e0b", "低": "#6b7280" };
 
 async function loadTodos() {
+  document.getElementById("todo-list").innerHTML = '<div class="skeleton" style="height:160px"></div>';
   todoItems = (await apiCall("get_todos")) || [];
   renderTodos();
 }
@@ -733,7 +1112,7 @@ function renderTodos() {
   const el = document.getElementById("todo-list");
   document.getElementById("todo-count").textContent = filtered.length ? `${filtered.length} 条` : "";
   if (!filtered.length) {
-    el.innerHTML = `<div class="tl-empty">没有匹配的待办。</div>`;
+    el.innerHTML = `<div class="tl-empty"><div class="empty-icon">☑</div>没有匹配的待办。<div class="empty-hint">试试调整筛选条件，或新建一条待办。</div></div>`;
     return;
   }
   el.innerHTML = filtered.map((it) => {
@@ -912,6 +1291,8 @@ document.querySelectorAll(".preset").forEach((btn) => {
 document.getElementById("tl-desc").addEventListener("change", renderTimeline);
 document.getElementById("gen-day").addEventListener("click", () => generateReport("day"));
 document.getElementById("gen-week").addEventListener("click", () => generateReport("week"));
+document.getElementById("home-gen-day").addEventListener("click", () => generateReport("day"));
+document.getElementById("home-capture").addEventListener("click", startManualCapture);
 
 /* ===================== 启动 ===================== */
 
