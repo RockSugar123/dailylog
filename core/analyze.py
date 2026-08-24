@@ -4,8 +4,7 @@ import json
 import re
 from pathlib import Path
 
-import config
-import llm
+from core import config, llm
 
 ANALYZE_PROMPT = """你是工作日志记录助手。分析这张屏幕截图，记录此刻正在进行的工作活动。
 

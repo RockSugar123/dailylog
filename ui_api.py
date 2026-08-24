@@ -10,11 +10,7 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 
-import analyze
-import config
-import summarize
-import todos
-import usage
+from core import analyze, config, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
@@ -33,7 +29,7 @@ def _write_settings(**overrides) -> None:
     config.SETTINGS.update(overrides)
 
 
-def _task_command(flag: str = "--capture", script: str = "capture.py") -> str:
+def _task_command(flag: str = "--capture", script: str = "core/capture.py") -> str:
     """任务计划要执行的命令。打包后（frozen）运行 exe <flag>，开发期运行 pythonw <script>。"""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}" {flag}'
@@ -196,7 +192,7 @@ def disable_task() -> None:
 def ensure_usage_task() -> None:
     """确保应用时长采样任务存在（应用启动时调用，幂等；创建即启用）。"""
     _schtasks("/create", "/tn", USAGE_TASK_NAME, "/tr",
-              _task_command("--usage", "usage.py"),
+              _task_command("--usage", "core/usage.py"),
               "/sc", "minute", "/mo", str(config.USAGE_INTERVAL_MINUTES), "/f")
 
 

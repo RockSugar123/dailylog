@@ -2,21 +2,22 @@
 
 由 Windows 任务计划程序每 10 分钟调用一次（pythonw 运行，无控制台）。
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import ctypes
 import hashlib
 import json
 import re
-import sys
 import time
 from datetime import datetime, timedelta
 
 import mss
 import mss.tools
-from pathlib import Path
 
-import analyze
-import config
-import usage
+from core import analyze, config, usage
 
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8")

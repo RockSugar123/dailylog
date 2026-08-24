@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import config
+from core import config
 
 STATUSES = ("未开始", "进行中", "已完成", "归档")
 PRIORITIES = ("高", "中", "低")

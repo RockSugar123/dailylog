@@ -1,17 +1,20 @@
 """手动生成日报/周报：读取 raw 记录 → 千问文本模型 → reports/。
 
 用法：
-    python summarize.py                    # 今天的日报
-    python summarize.py --day 2026-07-31   # 某日日报
-    python summarize.py --week 2026-07-31  # 该日期所在周（周一~周日）的周报
+    python core/summarize.py                    # 今天的日报
+    python core/summarize.py --day 2026-07-31   # 某日日报
+    python core/summarize.py --week 2026-07-31  # 该日期所在周（周一~周日）的周报
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import json
-import sys
 from datetime import datetime, timedelta
 
-import config
-import llm
+from core import config, llm
 
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8")

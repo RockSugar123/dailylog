@@ -5,15 +5,18 @@
 - 聚合：ui_api 调 aggregate() 按日/周/月汇总各应用时长（采样次数 × 间隔，估算）。
 - 隐私：只记进程名（小写含 .exe），不记窗口标题——标题可能含文档名/网页标题。
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import ctypes
 import json
 import shutil
-import sys
 import tempfile
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-import config
+from core import config
 
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -156,7 +159,7 @@ def main() -> int:
     if not config.USAGE_ENABLED:
         return 0
     if config.IDLE_ENABLED:
-        from capture import last_input_idle_seconds  # 延迟导入避免循环依赖（capture 不依赖 usage）
+        from core.capture import last_input_idle_seconds  # 延迟导入避免循环依赖（capture 不依赖 usage）
         if last_input_idle_seconds() > config.IDLE_MINUTES * 60:
             return 0
     app = foreground_app()

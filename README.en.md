@@ -103,10 +103,10 @@ On startup the app automatically registers the Windows scheduled task `DailyLogC
 | Purpose | Command |
 |---------|---------|
 | Desktop app (recommended) | `python app.py` |
-| Capture only (headless, called by Task Scheduler) | `pythonw capture.py` |
-| Generate today's daily report | `python summarize.py` |
-| Generate a specific day's report | `python summarize.py --day 2026-07-31` |
-| Generate a weekly report (ISO week of that date) | `python summarize.py --week 2026-07-31` |
+| Capture only (headless, called by Task Scheduler) | `pythonw core\capture.py` |
+| Generate today's daily report | `python core\summarize.py` |
+| Generate a specific day's report | `python core\summarize.py --day 2026-07-31` |
+| Generate a weekly report (ISO week of that date) | `python core\summarize.py --week 2026-07-31` |
 | Packaged desktop app | `dist\dailylog\dailylog.exe` |
 | Packaged capture | `dist\dailylog\dailylog.exe --capture` |
 | Packaged diagnostics (prints scheduler/config status) | `dist\dailylog\dailylog.exe --diag` |
@@ -128,7 +128,7 @@ schtasks /delete /tn DailyLogCapture /f   # Uninstall
 
 ```
 ┌──────────────────── Scheduled task DailyLogCapture (every 10 minutes) ────────────────────┐
-│  capture.py: idle check → mss screenshot → black-frame check → dedupe                    │
+│  core/capture.py: idle check → mss screenshot → black-frame check → dedupe               │
 │              → vision model analysis → write timeline → delete screenshot                │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
         │ writes
@@ -136,7 +136,7 @@ schtasks /delete /tn DailyLogCapture /f   # Uninstall
   records/YYYY-MM-DD.md (human-readable timeline) + records/raw/YYYY-MM-DD.jsonl (structured raw log)
         │
         ▼ manual trigger (UI button / CLI)
-  summarize.py: aggregate logs → DeepSeek → reports/日报-YYYY-MM-DD.md / 周报-YYYY-Www.md
+  core/summarize.py: aggregate logs → DeepSeek → reports/日报-YYYY-MM-DD.md / 周报-YYYY-Www.md
 ```
 
 ## 🔧 Settings
@@ -178,7 +178,7 @@ One JSON object per line:
  "detail": "…", "progress": "…", "todo": "…", "apps": ["VS Code"], "contains_sensitive": false}
 ```
 
-- `activity` categories: `coding` / `writing` / `meeting` / `research` / `communication` / `data` / `support` / `browsing` / `idle` / `other` (labels editable in [config.py](config.py))
+- `activity` categories: `coding` / `writing` / `meeting` / `research` / `communication` / `data` / `support` / `browsing` / `idle` / `other` (labels editable in [core/config.py](core/config.py))
 - `contains_sensitive`: the entry involved sensitive content (already redacted)
 
 ### Reports `reports/`
@@ -206,10 +206,14 @@ One JSON object per line:
 dailylog/
 ├── .env                    # Two API keys (fill in yourself; never distribute)
 ├── requirements.txt        # mss / requests / python-dotenv / pywebview / pywin32 / pystray / pillow / pynput
-├── config.py               # All tunable parameters (API, intervals, dirs, category labels)
-├── capture.py              # Capture entry point (called by Task Scheduler)
-├── analyze.py              # Vision model call (config.ANALYZE_MODEL swappable) + lenient JSON parsing + prompt
-├── summarize.py            # DeepSeek daily/weekly report generation (CLI: --day / --week)
+├── core/                   # Business modules (always use absolute `from core import X` internally)
+│   ├── config.py           # All tunable parameters (API, intervals, dirs, category labels)
+│   ├── capture.py          # Capture entry point (called by Task Scheduler; directly runnable)
+│   ├── analyze.py          # Vision model call (config.ANALYZE_MODEL swappable) + lenient JSON parsing + prompt
+│   ├── summarize.py        # DeepSeek daily/weekly report generation (CLI: --day / --week; directly runnable)
+│   ├── usage.py            # App usage-time sampling & aggregation (directly runnable)
+│   ├── todos.py            # Todo management
+│   └── llm.py              # Unified LLM call channel
 ├── ui_api.py               # Desktop API bridge: timeline/reports/settings/scheduler (pure Python, testable without GUI)
 ├── app.py                  # Desktop entry: pywebview borderless window + pystray tray
 ├── dailylog.spec           # PyInstaller packaging config (onedir)
@@ -268,7 +272,7 @@ Other notes:
 
 ## 📄 License
 
-[MIT](LICENSE)
+MIT
 
 ---
 

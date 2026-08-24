@@ -103,10 +103,10 @@ python app.py
 | 用途 | 命令 |
 |------|------|
 | 桌面应用（推荐） | `python app.py` |
-| 仅截屏记录（无界面，任务计划调用） | `pythonw capture.py` |
-| 生成今天的日报 | `python summarize.py` |
-| 生成某日日报 | `python summarize.py --day 2026-07-31` |
-| 生成某周周报（该日期所在 ISO 周） | `python summarize.py --week 2026-07-31` |
+| 仅截屏记录（无界面，任务计划调用） | `pythonw core\capture.py` |
+| 生成今天的日报 | `python core\summarize.py` |
+| 生成某日日报 | `python core\summarize.py --day 2026-07-31` |
+| 生成某周周报（该日期所在 ISO 周） | `python core\summarize.py --week 2026-07-31` |
 | 打包版桌面应用 | `dist\dailylog\dailylog.exe` |
 | 打包版截屏记录 | `dist\dailylog\dailylog.exe --capture` |
 | 打包诊断（打印任务计划/配置状态） | `dist\dailylog\dailylog.exe --diag` |
@@ -115,7 +115,7 @@ python app.py
 
 ```bash
 # 开发期（pythonw 无控制台窗口；/f 覆盖已存在任务）
-schtasks /create /tn DailyLogCapture /tr "\"<pythonw全路径>\" <项目绝对路径>\capture.py" /sc minute /mo 10 /f
+schtasks /create /tn DailyLogCapture /tr "\"<pythonw全路径>\" <项目绝对路径>\core\capture.py" /sc minute /mo 10 /f
 
 # 打包后（onedir，exe 在 dist\dailylog\ 下）
 schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dist\dailylog\dailylog.exe\" --capture" /sc minute /mo 10 /f
@@ -128,14 +128,14 @@ schtasks /delete /tn DailyLogCapture /f   # 卸载
 
 ```
 ┌──────────────────────────── 定时任务 DailyLogCapture（每 10 分钟） ────────────────────────────┐
-│  capture.py：空闲检测 → mss 截屏 → 黑屏检测 → 去重 → 视觉模型分析 → 写时间线 → 删截图         │
+│  core/capture.py：空闲检测 → mss 截屏 → 黑屏检测 → 去重 → 视觉模型分析 → 写时间线 → 删截图      │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
         │ 写入
         ▼
   records/YYYY-MM-DD.md（人类可读时间线） + records/raw/YYYY-MM-DD.jsonl（结构化原始记录）
         │
         ▼ 手动触发（UI 按钮 / CLI）
-  summarize.py：聚合记录 → DeepSeek → reports/日报-YYYY-MM-DD.md / 周报-YYYY-Www.md
+  core/summarize.py：聚合记录 → DeepSeek → reports/日报-YYYY-MM-DD.md / 周报-YYYY-Www.md
 ```
 
 ## 🔧 设置项
@@ -177,7 +177,7 @@ schtasks /delete /tn DailyLogCapture /f   # 卸载
  "detail": "…", "progress": "…", "todo": "…", "apps": ["VS Code"], "contains_sensitive": false}
 ```
 
-- `activity` 分类：`coding`开发 / `writing`文档 / `meeting`会议 / `research`学习 / `communication`沟通 / `data`数据分析 / `support`运维 / `browsing`生活 / `idle`空闲 / `other`其他（[config.py](config.py) 可改标签）
+- `activity` 分类：`coding`开发 / `writing`文档 / `meeting`会议 / `research`学习 / `communication`沟通 / `data`数据分析 / `support`运维 / `browsing`生活 / `idle`空闲 / `other`其他（[core/config.py](core/config.py) 可改标签）
 - `contains_sensitive`：该条涉及敏感内容（已脱敏）
 
 ### 报告 `reports/`
@@ -205,10 +205,14 @@ schtasks /delete /tn DailyLogCapture /f   # 卸载
 dailylog/
 ├── .env                    # 两个 API Key（用户自行填写，勿随包分发）
 ├── requirements.txt        # mss / requests / python-dotenv / pywebview / pywin32 / pystray / pillow / pynput
-├── config.py               # 全部可调参数集中（API、间隔、目录、分类标签）
-├── capture.py              # 截屏记录入口（任务计划调用）
-├── analyze.py              # 视觉模型调用（config.ANALYZE_MODEL 可换）+ 宽容 JSON 解析 + 分析 prompt
-├── summarize.py            # DeepSeek 日报/周报生成（CLI：--day / --week）
+├── core/                   # 业务模块（内部一律 from core import X 绝对导入）
+│   ├── config.py           # 全部可调参数集中（API、间隔、目录、分类标签）
+│   ├── capture.py          # 截屏记录入口（任务计划调用，可直接运行）
+│   ├── analyze.py          # 视觉模型调用（config.ANALYZE_MODEL 可换）+ 宽容 JSON 解析 + 分析 prompt
+│   ├── summarize.py        # DeepSeek 日报/周报生成（CLI：--day / --week，可直接运行）
+│   ├── usage.py            # 应用使用时长采集与聚合（可直接运行）
+│   ├── todos.py            # 待办管理
+│   └── llm.py              # 统一 LLM 调用通道
 ├── ui_api.py               # 桌面应用 API 桥：时间线/报告/设置/任务计划管理（纯 Python，可无 GUI 直测）
 ├── app.py                  # 桌面应用入口：pywebview 无边框窗口 + pystray 托盘
 ├── dailylog.spec           # PyInstaller 打包配置（onedir）
@@ -267,7 +271,7 @@ pyinstaller dailylog.spec # 注意：onedir 模式会清空重建输出目录！
 
 ## 📄 许可证
 
-[MIT](LICENSE)
+MIT
 
 ---
 

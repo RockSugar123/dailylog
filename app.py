@@ -20,7 +20,7 @@ import webview
 from PIL import Image
 import pystray
 
-import config
+from core import config
 import ui_api
 
 _logger = config.setup_logging()
@@ -83,7 +83,7 @@ class AppApi(ui_api.Api):
     def manual_capture(self) -> dict:
         """设置页按钮/全局热键触发：立即截屏分析记录（force 跳过去重与空闲检查）。"""
         try:
-            import capture  # noqa: PLC0415 延迟导入：截屏依赖只在需要时进内存
+            from core import capture  # noqa: PLC0415 延迟导入：截屏依赖只在需要时进内存
             code = capture.main(force=True)
             return {"ok": code == 0}
         except Exception as e:  # noqa: BLE001
@@ -146,7 +146,7 @@ class AppApi(ui_api.Api):
 
 def main() -> None:
     try:
-        import capture  # noqa: PLC0415 延迟导入：截屏依赖（mss）只在需要时进内存
+        from core import capture  # noqa: PLC0415 延迟导入：截屏依赖（mss）只在需要时进内存
         capture.cleanup_expired()  # 启动时按保留天数清理过期数据（每天一次）
     except Exception as e:  # noqa: BLE001
         _logger.error("启动数据清理失败: %s", e)
@@ -226,7 +226,7 @@ def main() -> None:
         """立即执行一次截屏分析（后台线程），结果弹 toast。force=True 跳过去重与空闲检查。"""
         def run():
             try:
-                import capture  # noqa: PLC0415
+                from core import capture  # noqa: PLC0415
                 code = capture.main(force=force)
                 msg = "记录完成" if code == 0 else "记录失败，详见 dailylog.log"
             except Exception as e:  # noqa: BLE001
@@ -375,7 +375,7 @@ def main() -> None:
         """测试模式：秒级循环截屏（任务计划最小只能 1 分钟）。清除设置即停。"""
         secs = config.SETTINGS.get("test_interval_seconds")
         _logger.info("测试模式：每 %s 秒截屏一次（设置页改回分钟即退出）", secs)
-        import capture  # noqa: PLC0415
+        from core import capture  # noqa: PLC0415
         while True:
             secs = config.SETTINGS.get("test_interval_seconds")
             if not secs:
@@ -412,10 +412,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     if "--capture" in sys.argv:
-        import capture
+        from core import capture
         sys.exit(capture.main())
     if "--usage" in sys.argv:
-        import usage
+        from core import usage
         sys.exit(usage.main())
     if "--diag" in sys.argv:  # 打包诊断：从控制台打印 get_config 与 NextRunTime 异常
         import json as _json
