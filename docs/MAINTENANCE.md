@@ -89,4 +89,33 @@ build.bat 的流程：PyInstaller 先输出到临时 `dist_build\` → robocopy 
 - **吞异常 = 欠债**：所有 except 至少 logger.error 或注明为何可忽略；GUI/定时程序第一行就建日志
   （已有统一日志：dailylog.log，RotatingFileHandler）
 - 破坏性操作（清缓存、重建目录、批量删除）动手前先列出"哪些文件会变"，有不可再生内容先备份
-- 提交信息风格参考 git log：`feat:` / `perf:` / `docs:` / `fix:` 前缀 + 中文描述
+
+## 7. Git 提交规范
+
+### 格式
+
+```
+<type>:<中文描述>
+```
+
+- **冒号后不加空格**（与现有 git log 保持一致）
+- 描述用中文，一句话说清"改了什么、为什么"；避免只写文件名或"更新""修改"这类空词
+- 一行以内；更多背景写进正文（空一行后）或 `docs/STATUS.md` 的变更日志
+
+### type 取值
+
+| type | 用途 | 示例（来自本仓库真实历史） |
+|------|------|------|
+| `feat` | 新功能、新能力 | `feat:截屏分析接入前台窗口元数据（进程名+窗口标题），提升分类与应用识别消歧` |
+| `fix` | 修 bug | `fix:修复专注时长显示浮点尾数与皮肤回退问题` |
+| `perf` | 性能优化（不改行为） | `perf:零窗口托盘化降低常驻内存` |
+| `refactor` | 重构（不改功能） | `refactor:业务模块分层进 core/，清理冗余文件与过时文档，新增 MAINTENANCE 维护指南` |
+| `docs` | 纯文档改动 | `docs:状态待办销项（结构整理与图标已提交）` |
+| `chore` | 构建/工具/杂务 | `chore:build.bat 排除清单补充 .last_cleanup` |
+
+### 拆分原则
+
+- **一个 commit 只做一件事**：不相关的改动拆开提交（如"结构重构"和"换图标"分两个 commit）
+- 功能代码与它对应的 STATUS.md 更新可放同一 commit；纯文档改动单独用 `docs:`
+- 提交前 `git status` + `git diff` 核对暂存内容，只提交本次改动相关文件；
+  运行数据（records/reports/日志/密钥）永远不入库（.gitignore 已覆盖，勿绕过）
