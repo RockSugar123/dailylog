@@ -21,12 +21,17 @@ if sys.stdout is not None:
 _logger = config.setup_logging()
 
 
-def foreground_app() -> str | None:
-    """当前前台窗口的进程名（小写，含 .exe 后缀）；读取失败返回 None。"""
+def foreground_window() -> tuple[str | None, str]:
+    """当前前台窗口的 (进程名小写含 .exe 后缀, 窗口标题)；进程名失败返回 None，标题可能为空。
+
+    标题供截屏分析做消歧参考；本模块自身统计仍只用进程名（标题可能含敏感内容，不落盘）。
+    """
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     # 64 位句柄/指针：不声明 argtypes 时 ctypes 默认按 c_int 截断（经典坑，见 capture.py）
     user32.GetForegroundWindow.restype = ctypes.c_void_p
+    user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
     user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
     kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong]
     kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -38,22 +43,29 @@ def foreground_app() -> str | None:
 
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
-        return None
+        return None, ""
+    title_buf = ctypes.create_unicode_buffer(256)
+    user32.GetWindowTextW(hwnd, title_buf, 256)
     pid = ctypes.c_ulong()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     if not pid.value:
-        return None
+        return None, title_buf.value
     handle = kernel32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not handle:
-        return None
+        return None, title_buf.value
     try:
-        buf = ctypes.create_unicode_buffer(1024)
-        size = ctypes.c_ulong(len(buf))
-        if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
-            return None
-        return Path(buf.value).name.lower()
+        path_buf = ctypes.create_unicode_buffer(1024)
+        size = ctypes.c_ulong(len(path_buf))
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, path_buf, ctypes.byref(size)):
+            return None, title_buf.value
+        return Path(path_buf.value).name.lower(), title_buf.value
     finally:
         kernel32.CloseHandle(handle)
+
+
+def foreground_app() -> str | None:
+    """当前前台窗口的进程名（小写，含 .exe 后缀）；读取失败返回 None。"""
+    return foreground_window()[0]
 
 
 def append_usage(ts: datetime, app: str) -> None:

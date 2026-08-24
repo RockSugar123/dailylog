@@ -12,9 +12,11 @@ from datetime import datetime, timedelta
 
 import mss
 import mss.tools
+from pathlib import Path
 
 import analyze
 import config
+import usage
 
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -221,6 +223,12 @@ def main(force: bool = False) -> int:
 
     config.SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now()
+    # 前台窗口元数据必须在隐藏自身窗口之前采样：隐藏会改变前台归属，采晚了就采到别的窗口。
+    # 自己（dailylog.exe/pythonw.exe）在前台时，隐藏后画面已换成别的窗口，元数据不可信，弃用。
+    fg_process, fg_title = usage.foreground_window()
+    if fg_process == Path(sys.executable).name.lower():
+        fg_process, fg_title = None, ""
+        log("前台是 dailylog 自身，跳过前台元数据")
     png_path = None
     try:
         with mss.MSS() as sct:
@@ -269,7 +277,8 @@ def main(force: bool = False) -> int:
     try:
         for attempt in range(config.MAX_RETRIES + 1):
             try:
-                record = analyze.call_analyze(analyze.encode_image(png_path), existing_todos)
+                foreground = " / ".join(p for p in (fg_process, fg_title.strip()) if p)
+                record = analyze.call_analyze(analyze.encode_image(png_path), existing_todos, foreground=foreground)
                 break
             except Exception as e:
                 log(f"分析失败(第{attempt + 1}次): {e}")

@@ -86,13 +86,22 @@ def normalize(result: dict) -> dict:
     return result
 
 
-def call_analyze(image_url: str, existing_todos: list = None) -> dict:
+def call_analyze(image_url: str, existing_todos: list = None, foreground: str = "") -> dict:
     """调 NVIDIA NIM 视觉模型分析截图，返回规范化 dict；失败抛异常。
 
     existing_todos：当日已提取的待办列表，随请求带给模型做去重，
     避免同一件事被反复生成待办（碎片化）。
+    foreground："进程名 / 窗口标题" 形式的前台窗口元数据，作画面消歧的硬信号
+    （如 code.exe=VS Code），不落盘；为空时不附加。
     """
     prompt = ANALYZE_PROMPT
+    if foreground:
+        prompt += (
+            f"\n\n【当前前台窗口】{foreground}\n"
+            "以此为第一优先依据判断 activity 分类与 apps 字段（进程名是可靠信号，"
+            "如 code.exe 是 VS Code）；窗口标题仅作参考，禁止复述其中的联系人、"
+            "账号、密钥等敏感信息。"
+        )
     if existing_todos:
         prompt += (
             "\n\n【今日已记录的待办】\n"
