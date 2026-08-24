@@ -41,8 +41,8 @@
 - `visibilitychange` 暂停 FX 依赖 WebView2 把隐藏窗口标记为 hidden，未逐项验证
 - 打包版静态文件在 `dist\dailylog\_internal\static`，改前端必须重跑 build.bat 才生效
 - 维护与打包约定见 `docs/MAINTENANCE.md`
-- **待办**：2026-08-25 的结构整理（core/ 分层 + 清理 + 文档）尚未提交 git，
-  与 icon.ico 黑猫新图标改动一起提交；提交后需重跑 build.bat 部署新版
+- 结构整理（core/ 分层 + 清理 + 文档）与黑猫图标已提交（5df8faf / 55bcdf0）；
+  **下次改动前端后记得重跑 build.bat 部署**（当前 dist 里还是旧结构打包版，不影响运行）
 
 ## 变更日志（摘要）
 
