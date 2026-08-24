@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 ### 2. Configure API keys
 
-Fill in the keys following [.env.example](.env.example) (place it in the project's `data\` directory during development; the packaged build reads `%LOCALAPPDATA%\dailylog\.env`):
+Fill in the keys following [.env.example](.env.example) (place it in the project's `data\` directory during development; the packaged build reads `dailylog-app\data\.env` next to the deployed exe):
 
 ```
 ANALYZE_API_KEY=your-NVIDIA-key
@@ -223,10 +223,10 @@ dailylog/
 
 # Deploy directory (outside the repo): ..\dailylog-app\
 # └── dailylog.exe + _internal/   pure product, contains no data
-# Packaged-build runtime data: %LOCALAPPDATA%\dailylog\ (records/reports/.env/settings.json etc.)
+# Packaged-build runtime data: ..\dailylog-app\data\ (records/reports/.env/settings.json etc., excluded from builds)
 ```
 
-> **Data locations**: determined by `DATA_DIR` in `core/config.py`, kept separate from code and build artifacts — dev build uses the project's `data/`, packaged build uses `%LOCALAPPDATA%\dailylog/`.
+> **Data locations**: determined by `DATA_DIR` in `core/config.py`, always the `data\` subfolder of BASE_DIR — dev build uses the project's `data/`, packaged build uses `dailylog-app\data\`.
 
 </details>
 
@@ -237,18 +237,18 @@ build.bat                 # The only entry: builds to a temp dir, then mirror-de
 pyinstaller dailylog.spec # Warning: onedir mode wipes and rebuilds the output directory!
 ```
 
-**Important**: PyInstaller onedir packaging **wipes and rebuilds the output directory**. **Always use `build.bat`** (builds to a temp `dist_build/`, then mirror-deploys to `..\dailylog-app` outside the repo). Runtime data lives in `%LOCALAPPDATA%\dailylog\`, not in the deploy directory, so builds can never touch it.
+**Important**: PyInstaller onedir packaging **wipes and rebuilds the output directory**. **Always use `build.bat`** (builds to a temp `dist_build/`, then mirror-deploys to `..\dailylog-app` outside the repo with `/XD data`). Runtime data lives in the deploy directory's `data\` subfolder, which the mirror excludes, so builds can never touch it.
 
 Other notes:
 
-- Packaged-build data (`.env`, `settings.json`, `records/`, `reports/`) lives in `%LOCALAPPDATA%\dailylog\`; never distribute the key-containing `.env`
+- Packaged-build data (`.env`, `settings.json`, `records/`, `reports/`) lives in `dailylog-app\data\`; never distribute the key-containing `.env`
 - When changing the deploy location, update three places: `DEPLOY_DIR` in build.bat, the desktop shortcut, and the exe paths of scheduled tasks DailyLogCapture / DailyLogUsage
 - The packaging environment needs pyinstaller installed separately
 - The WebView2 data directory is pinned to `%LOCALAPPDATA%\dailylog\webview` (avoids creating a new temp dir on every launch); stale leftovers are cleaned automatically on startup
 
 ## 🩺 Troubleshooting
 
-- **All runtime logs**: `dailylog.log` (1MB rotation, 3 copies kept) — dev build under the project's `data\`, packaged build under `%LOCALAPPDATA%\dailylog\`
+- **All runtime logs**: `dailylog.log` (1MB rotation, 3 copies kept) under each build's `data\` directory (project root for dev, next to the exe for packaged)
 - **Scheduled task not firing**: the Settings page "Current status" shows "disabled"; check with `schtasks /query /tn DailyLogCapture`
 - **API errors**: errors are logged with the first 300 chars of the response body for diagnosis (e.g. 400 = wrong model name/key)
 - **Sub-minute test recording**: after writing `test_interval_seconds` (Settings page or `apply_test_interval`), the app enters a test loop in-process (Task Scheduler schema has a 1-minute minimum, so sub-minute intervals must be driven by the app process)

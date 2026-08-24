@@ -1,4 +1,4 @@
-# dailylog · 今日轨迹
+﻿# dailylog · 今日轨迹
 
 **简体中文** | [English](README.en.md)
 
@@ -83,7 +83,7 @@ pip install -r requirements.txt
 
 ### 2. 配置 API Key
 
-按 [.env.example](.env.example) 的键名填写（开发期放项目 `data\` 目录，打包版放在 `%LOCALAPPDATA%\dailylog\.env`）：
+按 [.env.example](.env.example) 的键名填写（开发期放项目 `data\` 目录，打包版放在部署目录的 `dailylog-app\data\.env`）：
 
 ```
 ANALYZE_API_KEY=你的NVIDIA Key
@@ -222,10 +222,10 @@ dailylog/
 
 # 部署目录（项目外）：..\dailylog-app\
 # └── dailylog.exe + _internal/   纯产物，不含任何数据
-# 打包版运行数据：%LOCALAPPDATA%\dailylog\（records/reports/.env/settings.json 等）
+# 打包版运行数据：..\dailylog-app\data\（records/reports/.env/settings.json 等，构建时排除）
 ```
 
-> **数据位置**：由 `core/config.py` 的 `DATA_DIR` 决定，与代码和构建产物分离——开发版在项目 `data/`，打包版在 `%LOCALAPPDATA%\dailylog/`。
+> **数据位置**：由 `core/config.py` 的 `DATA_DIR` 决定，统一是 BASE_DIR 下的 `data\` 子目录——开发版在项目 `data/`，打包版在部署目录的 `dailylog-app\data\`。
 
 </details>
 
@@ -236,18 +236,18 @@ build.bat                 # 唯一入口：打包到临时目录再镜像部署�
 pyinstaller dailylog.spec # 注意：onedir 模式会清空重建输出目录！
 ```
 
-**重要**：PyInstaller onedir 打包会**清空重建输出目录**。**务必使用 `build.bat`**（打包到临时 `dist_build/` 后镜像部署到项目外的 `..\dailylog-app`）。运行数据在 `%LOCALAPPDATA%\dailylog\`，不在部署目录里，构建不会伤到数据。
+**重要**：PyInstaller onedir 打包会**清空重建输出目录**。**务必使用 `build.bat`**（打包到临时 `dist_build/` 后镜像部署到项目外的 `..\dailylog-app`，robocopy `/XD data` 排除数据目录）。运行数据在部署目录的 `data\` 子目录里，构建不会伤到。
 
 其他注意：
 
-- 打包版数据（`.env`、`settings.json`、`records/`、`reports/`）在 `%LOCALAPPDATA%\dailylog\`，不要把含密钥的 `.env` 随包分发
+- 打包版数据（`.env`、`settings.json`、`records/`、`reports/`）在 `dailylog-app\data\`，不要把含密钥的 `.env` 随包分发
 - 换部署位置时需同步三处：build.bat 的 `DEPLOY_DIR`、桌面快捷方式、任务计划 DailyLogCapture / DailyLogUsage 的 exe 路径
 - 打包环境需额外安装 pyinstaller
 - WebView2 数据目录固定在 `%LOCALAPPDATA%\dailylog\webview`（避免每次启动新建临时目录）；历史残留由应用启动时自动清理
 
 ## 🩺 故障排查
 
-- **所有运行日志**：`dailylog.log`（1MB 轮转保留 3 份），开发版在项目 `data\` 下、打包版在 `%LOCALAPPDATA%\dailylog\`
+- **所有运行日志**：`dailylog.log`（1MB 轮转保留 3 份），在各自的 `data\` 目录下（开发版项目根、打包版 exe 同目录）
 - **任务计划未生效**：设置页「当前状态」会显示"已停用"；用 `schtasks /query /tn DailyLogCapture` 检查
 - **API 报错**：错误会带响应体前 300 字符写入日志，便于定位（如 400 模型名/Key 错误）
 - **测试秒级记录**：设置页或 `apply_test_interval` 写入 `test_interval_seconds` 后，应用内自动进入测试循环（任务计划 schema 限制最小 1 分钟，秒级只能由应用进程驱动）
@@ -266,3 +266,4 @@ MIT
 ---
 
 **简体中文** | [English](README.en.md)
+

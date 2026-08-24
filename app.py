@@ -81,14 +81,22 @@ class AppApi(ui_api.Api):
         return result
 
     def manual_capture(self) -> dict:
-        """设置页按钮/全局热键触发：立即截屏分析记录（force 跳过去重与空闲检查）。"""
-        try:
-            from core import capture  # noqa: PLC0415 延迟导入：截屏依赖只在需要时进内存
-            code = capture.main(force=True)
-            return {"ok": code == 0}
-        except Exception as e:  # noqa: BLE001
-            _logger.error("手动截屏失败: %s", e)
-            return {"ok": False, "error": str(e)}
+        """设置页按钮触发：后台线程执行截屏分析（同步跑会阻塞 JS 桥，
+        期间最小化/最大化等所有窗口控制全部无响应），完成后前端 toast。"""
+        def run():
+            try:
+                from core import capture  # noqa: PLC0415
+                code = capture.main(force=True)
+                msg = "记录完成" if code == 0 else "记录失败，详见 dailylog.log"
+            except Exception as e:  # noqa: BLE001
+                _logger.error("手动截屏失败: %s", e)
+                msg = f"记录失败: {e}"
+            try:
+                self._window.evaluate_js(f"toast({json.dumps(msg)})")
+            except Exception:  # noqa: BLE001 窗口可能已关闭
+                pass
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True}
 
     def export_data_dialog(self) -> dict:
         """数据管理·导出：系统保存对话框选路径后写 JSON 备份。

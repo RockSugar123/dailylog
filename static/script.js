@@ -1062,9 +1062,8 @@ function startManualCapture() {
     if (n <= 0) {
       clearInterval(manualTimer);
       manualTimer = null;
-      toast("正在分析屏幕…（约 10-60 秒）", 0); // 持久显示，完成后再替换
-      const r = await apiCall("manual_capture");
-      toast(r && r.ok ? "已记录本次截屏" : "记录失败，详见 dailylog.log", r && r.ok ? 2600 : 6000);
+      toast("正在分析屏幕…（约 10-60 秒）", 0); // 持久显示，完成后由后端回调替换
+      await apiCall("manual_capture"); // 后台线程执行，立即返回；结果 toast 由后端推送
       refreshStatus();
     } else {
       toast(`${n} 秒后截取当前屏幕…`);

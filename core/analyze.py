@@ -1,8 +1,11 @@
 """调用 NVIDIA NIM 视觉模型分析截图，返回结构化记录。"""
 import base64
+import io
 import json
 import re
 from pathlib import Path
+
+from PIL import Image
 
 from core import config, llm
 
@@ -53,9 +56,18 @@ REQUIRED_FIELDS = ("activity", "summary", "detail", "progress", "todo", "apps", 
 
 
 def encode_image(png_path: Path) -> str:
-    """PNG 文件 → base64 data URL。"""
-    data = base64.b64encode(png_path.read_bytes()).decode()
-    return f"data:image/png;base64,{data}"
+    """截图 → 缩放 JPEG → base64 data URL。
+
+    NIM 部署限制请求体大小，4K 屏的原始 PNG base64 后动辄超限（HTTP 400
+    "Request payload is too large"），必须先缩放并转 JPEG 压缩。
+    """
+    img = Image.open(png_path).convert("RGB")
+    if max(img.size) > config.ANALYZE_IMAGE_MAX_SIDE:
+        img.thumbnail((config.ANALYZE_IMAGE_MAX_SIDE, config.ANALYZE_IMAGE_MAX_SIDE))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=config.ANALYZE_JPEG_QUALITY)
+    data = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/jpeg;base64,{data}"
 
 
 def parse_json(content: str) -> dict:

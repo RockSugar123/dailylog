@@ -24,12 +24,13 @@ dailylog/                     # 源码仓库：只放代码和文档，不含任
 ├── build.bat           # 唯一合法的打包入口（见第 4 节），部署到项目外的 ..\dailylog-app
 └── dailylog.spec       # PyInstaller 配置（入口 app.py；datas 收 static/）
 
-dailylog-app\              # 部署目录（项目外、仓库外）：纯产物，只有 exe + _internal/
-%LOCALAPPDATA%\dailylog\   # 打包版运行数据：records/reports/.env/settings.json/日志/webview
+dailylog-app\              # 部署目录（项目外、仓库外）
+├── dailylog.exe + _internal/   # 纯产物，构建可整目录重建
+└── data\                  # 打包版运行数据：records/reports/.env/settings.json/日志
 ```
 
-**三个物理位置各司其职**：源码仓库（可随意重建）、部署目录（可被构建整目录重建）、
-运行数据（不可再生，永远不在前两者的目录里）。
+**三个物理位置各司其职**：源码仓库（可随意重建）、部署目录的产物部分（exe/_internal，
+可被构建重建）、运行数据 `data\`（不可再生，构建镜像时被显式排除）。
 
 ## 2. 新文件该放哪
 
@@ -51,16 +52,17 @@ dailylog-app\              # 部署目录（项目外、仓库外）：纯产物
 
 ## 3. 数据目录：由 DATA_DIR 决定（最容易踩的坑）
 
-数据目录统一由 `core/config.py` 的 `DATA_DIR` 决定，与代码（BASE_DIR）分离：
+数据目录统一由 `core/config.py` 的 `DATA_DIR` 决定：**永远是 BASE_DIR 下的 `data\` 子目录**。
 
-- **开发版**（`python app.py`）：DATA_DIR = 项目根的 `data\`
-- **打包版**（`dailylog-app\dailylog.exe`）：frozen 模式，DATA_DIR = `%LOCALAPPDATA%\dailylog\`
+- **开发版**（`python app.py`）：`项目根\data\`
+- **打包版**（`dailylog-app\dailylog.exe`）：frozen 模式，BASE_DIR = exe 所在目录，
+  即 `dailylog-app\data\`
 
 两套目录内容相同：records/、reports/、screenshots/、.env（密钥）、settings.json、
 state.json、.last_cleanup、dailylog.log。
 
 排查任何"数据不见了/设置没生效"的问题，第一步先确认看的是哪一套。
-桌面快捷方式指向的是打包版（数据在 LOCALAPPDATA）。
+桌面快捷方式指向的是打包版。
 
 ## 4. 打包
 
@@ -69,13 +71,13 @@ state.json、.last_cleanup、dailylog.log。
 历史教训：PyInstaller onedir 会**清空重建输出目录**，2026-08-04 曾因直接往含数据的
 目录打包丢失过不可恢复的记录。现在的防御是双重的：
 
-1. 打包先输出到临时 `dist_build\` → robocopy `/MIR` 镜像到项目外的 `..\dailylog-app` → 删临时目录
-2. 运行数据在 `%LOCALAPPDATA%\dailylog`，根本不在部署目录里——即使误删部署目录也不伤数据
-   （因此 build.bat 不再需要 /XF /XD 排除清单；若未来新增"写在 exe 旁的数据"，说明设计偏离了本约定，应改回 DATA_DIR）
+1. 打包先输出到临时 `dist_build\` → robocopy `/MIR /XD data` 镜像到项目外的 `..\dailylog-app` → 删临时目录
+2. 运行数据统一在 `data\` 子目录（DATA_DIR），镜像时被显式排除——即使误删部署目录的产物部分也不伤数据；
+   **新增任何"写在程序目录下的数据文件"都必须放进 data\（走 config.DATA_DIR），不要散在 exe 旁**
 
 **维护规则**：
 - 改动部署流程前先想清楚"这次操作会让哪些文件变化"，不确定就先备份
-- 打包后验证三件事：exe 能启动、日志正常、LOCALAPPDATA 下 records 当日文件还在
+- 打包后验证三件事：exe 能启动、日志正常、`dailylog-app\data\records` 当日文件还在
 - 桌面快捷方式与任务计划（DailyLogCapture/DailyLogUsage）指向部署目录的 exe；
   换部署位置时三处要同步更新
 

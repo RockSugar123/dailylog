@@ -9,14 +9,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # BASE_DIR = 源码根（开发期）或 exe 所在目录（打包后），用于定位代码/脚本；
-# DATA_DIR = 运行数据（记录/报告/设置/密钥/日志），与代码和构建产物彻底分离：
-# 开发期在项目 data/ 下，打包后在 %LOCALAPPDATA%\dailylog——构建重建部署目录不会伤到数据
+# DATA_DIR = 运行数据（记录/报告/设置/密钥/日志），统一是 BASE_DIR 下的 data/ 子目录，
+# 与代码文件分离：构建重建部署目录时 robocopy 排除 data/ 即可保住全部数据
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
-    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "dailylog"
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
-    DATA_DIR = BASE_DIR / "data"
+DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 load_dotenv(DATA_DIR / ".env")
 
@@ -73,6 +72,10 @@ ENTER_CAPTURE_ENABLED = SETTINGS.get("enter_capture_enabled", False)  # 回车�
 ENTER_CAPTURE_INTERVAL = SETTINGS.get("enter_capture_interval", 15)   # 回车键记录间隔（秒）
 ENTER_INTERVAL_CHOICES = (5, 15, 30, 60)  # 回车键记录间隔选项（秒）
 MAX_RETRIES = 1                  # API 失败重试次数
+
+# 截图上传压缩（NIM 限制请求体大小，原始 4K PNG base64 会超限报 400）
+ANALYZE_IMAGE_MAX_SIDE = 1600    # 最长边像素上限
+ANALYZE_JPEG_QUALITY = 85        # JPEG 质量
 
 # 目录与状态
 RECORDS_DIR = DATA_DIR / "records"

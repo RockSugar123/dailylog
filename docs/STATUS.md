@@ -8,8 +8,8 @@
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
   - 根目录只留入口与桥接：`app.py`（GUI 主程序）、`ui_api.py`（前端 API 桥接）
-  - `core/config.py`：BASE_DIR = 源码根/exe 目录（定位代码），DATA_DIR = 运行数据目录，
-    **两者已分离**——开发版 DATA_DIR = 项目 `data\`，打包版 = `%LOCALAPPDATA%\dailylog`
+  - `core/config.py`：BASE_DIR = 源码根/exe 目录（定位代码），DATA_DIR = BASE_DIR 下 `data\` 子目录
+  （运行数据）——开发版 `项目\data\`，打包版 `dailylog-app\data\`，构建镜像时排除
   - capture / usage / summarize 会被任务计划或命令行**直接运行**，文件头部有 sys.path 引导，
     内部一律用 `from core import X` 绝对导入
 - `static/`：前端三件套 + 图标/字体。**改前端必须重跑 build.bat 才对打包版生效**
@@ -38,7 +38,7 @@
 4. 接受现状：显示 ~562MB 对 WebView2 GUI 属正常水平
 
 ## 遗留 / 注意事项
-- **两套数据目录**：开发版在项目 `data\`，打包版在 `%LOCALAPPDATA%\dailylog`。
+- **两套数据目录**：开发版在项目 `data\`，打包版在 `dailylog-app\data\`（都是 BASE_DIR 下 data 子目录）。
   排查数据问题先分清看的是哪一套
 - `visibilitychange` 暂停 FX 依赖 WebView2 把隐藏窗口标记为 hidden，未逐项验证
 - 改前端必须重跑 build.bat 部署到 `Desktop\dailylog-app` 才生效
@@ -47,16 +47,26 @@
 
 ## 变更日志（摘要）
 
+### 2026-08-25 用户实测反馈四项修复
+1. **手动截屏 HTTP 400**：NIM 报 "Request payload is too large"——4K 屏原始 PNG base64 超限。
+   修复：`analyze.encode_image` 先 PIL 缩放（最长边 `ANALYZE_IMAGE_MAX_SIDE=1600`）再转 JPEG
+   （质量 85），体积降一个数量级。已实测真实截屏成功入库
+2. **手动截屏后最小化/最大化无响应**：`AppApi.manual_capture` 在 JS 桥线程同步跑截屏+LLM
+   （含重试可达几十秒），阻塞所有窗口控制调用（✕ 是销毁窗口所以"看起来有反应"）。
+   修复：改后台线程执行，完成后 evaluate_js 回推 toast；前端去掉过早的成功提示
+3. **数据位置按用户要求调整**：frozen DATA_DIR 从 LOCALAPPDATA 改回部署目录旁，
+   统一公式 `DATA_DIR = BASE_DIR / "data"`；build.bat 加回 `/XD data` 排除；
+   数据已从 LOCALAPPDATA 迁到 `dailylog-app\data\`（LOCALAPPDATA 只留 webview 缓存）
+4. **快捷方式空白图标**：lnk 显式设置 IconLocation 指向 exe + ie4uinit 刷新图标缓存
+- 打包部署 + 启动验证通过
+
 ### 2026-08-25 数据/部署/源码三分离（根治打包事故类风险）
 - `core/config.py` 新增 DATA_DIR（数据）与 BASE_DIR（代码定位）分离：
-  开发版数据 → 项目 `data\`；frozen 数据 → `%LOCALAPPDATA%\dailylog`（与 WEBVIEW_DIR 同区）
+  开发版数据 → 项目 `data\`；frozen 数据最初放 `%LOCALAPPDATA%\dailylog`（同日按用户要求改为部署目录 data\）
 - 全模块数据路径改走 DATA_DIR；`ui_api._task_command()` 仍用 BASE_DIR 定位脚本（语义正确）
-- build.bat：部署目标改为项目外 `..\dailylog-app`，数据已不在部署目录，
-  robocopy 排除清单整体删除；旧 `dist\` 已删除
-- 数据迁移：开发数据移入 `data\`；dist 内 49 个记录文件 + .env/settings/state 等复制到
-  LOCALAPPDATA 并核对一致后删 dist
+- build.bat：部署目标改为项目外 `..\dailylog-app`；旧 `dist\` 已删除
+- 数据迁移：开发数据移入 `data\`；dist 内 49 个记录文件 + .env/settings/state 等迁移核对一致后删 dist
 - 桌面快捷方式、DailyLogCapture/DailyLogUsage 任务计划已指向新 exe 路径并启用
-- 新 exe 实测：启动正常（回车监听、托盘、窗口均工作）；后被托盘「退出程序」正常退出
 - 文档同步：MAINTENANCE.md 第 1/3/4 节重写、.gitignore 收敛为 data/ 一条
 
 ### 2026-08-25 项目结构整理（方案 B 分层）
