@@ -558,7 +558,19 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .tl-empty .empty-hint { color: var(--sub); font-size: 12.5px; margin-top: 4px }
 
 /* ===== 日报页 ===== */
-.report-actions { display: flex; gap: 12px; margin-bottom: 16px }
+.report-actions { display: flex; gap: 12px; margin-bottom: 16px; align-items: center }
+.report-actions-sep { width: 1px; height: 22px; background: var(--panel-border); margin: 0 4px }
+.date-input {
+  height: 32px; padding: 0 10px;
+  border-radius: 7px;
+  background: rgba(247, 235, 240, 0.06); color: var(--ink);
+  border: 1px solid var(--panel-border);
+  font-size: 13px;
+  color-scheme: dark;
+  font-family: inherit;
+}
+.date-input:hover { border-color: var(--glass-edge) }
+.date-input:focus { outline: none; border-color: var(--brand) }
 .report-list { display: flex; flex-direction: column; gap: 8px }
 .report-item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

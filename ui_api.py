@@ -302,6 +302,9 @@ class Api:
 
     def get_report(self, name: str) -> dict:
         """读取一份已生成的报告内容。"""
+        # name 来自前端，必须挡住 ..\..\ 形式的路径穿越
+        if not re.fullmatch(r"[\w\-]+\.md", name or ""):
+            return {"ok": False, "error": "非法的报告文件名"}
         path = config.REPORTS_DIR / name
         if not path.exists():
             return {"ok": False, "error": "报告不存在"}
@@ -543,6 +546,8 @@ class Api:
                 removed["reports"] += 1
             for p in config.USAGE_DIR.glob("*.jsonl"):  # 应用使用时长数据一并清除
                 p.unlink(missing_ok=True)
+            for p in config.SCREENSHOTS_DIR.glob("*.png"):  # 孤儿截图一并清除
+                p.unlink(missing_ok=True)
             for p in config.DATA_DIR.glob("dailylog.log*"):
                 p.unlink(missing_ok=True)
             config.TODOS_FILE.unlink(missing_ok=True)
@@ -578,7 +583,7 @@ class Api:
                 except OSError:
                     continue
         log_count = 0
-        for p in config.BASE_DIR.glob("dailylog.log*"):
+        for p in config.DATA_DIR.glob("dailylog.log*"):  # 日志在 data/ 下（BASE_DIR 是旧路径，已废弃）
             try:
                 total += p.stat().st_size
                 if p.name == "dailylog.log":

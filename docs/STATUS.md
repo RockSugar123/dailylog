@@ -47,6 +47,19 @@
 
 ## 变更日志（摘要）
 
+### 2026-08-25 代码审查修复（db_stats / clear_data / get_report）
+全量审查 Python 侧（app.py / ui_api.py / core/*），本轮修三处：
+- **db_stats 日志统计路径错**：还在扫 BASE_DIR 的 dailylog.log*，日志实际在 DATA_DIR → 数据管理页日志条数/容量恒为 0，已改扫 DATA_DIR
+- **clear_data 没删截图**（与 docstring 不符）：补删 SCREENSHOTS_DIR 下 *.png（返回结构不变）
+- **get_report 路径穿越**：name 来自前端直接拼路径，可 ..\..\ 读任意文件；加 `re.fullmatch(r"[\w\-]+\.md", name)` 校验
+
+审查发现但未修的遗留（按优先级）：
+1. import_data 两处不一致：reports 文件名只 endswith(".md") 未挡穿越；合并设置只写盘不同步内存镜像（config.IDLE_ENABLED 等），导入后需重启才生效
+2. 托盘回调访问未绑定的 window（app.py 托盘线程先于 window 赋值启动），启动瞬间点托盘会 NameError 被吞、点击无反应；建议线程启动前 `window = None`
+3. _write_settings 非原子写，写一半崩溃 settings.json 损坏后全部设置静默回默认
+4. todos.sync_from_records 无新增时不推进 last_synced_ts → 每次全量重扫当天 jsonl，线性变慢
+5. task_next_run Interval 正则不识别 PT#H/组合格式（当前自建任务只会 PT#M，未触发）
+
 ### 2026-08-25 设置不生效修复 + 截图治理
 - **设置改动即保存**（79fdd8c）：此前除皮肤外所有设置只在点"保存"时落盘，
   改完直接关窗/退出全部丢失（用户实测"重启后恢复原状"的根因）。

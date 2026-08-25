@@ -893,12 +893,13 @@ document.querySelectorAll(".chart-btn").forEach((btn) => {
 
 /* ===================== 日报周报页 ===================== */
 
-async function generateReport(kind) {
-  toast(kind === "day" ? "正在生成日报…" : "正在生成周报…");
-  const r = await apiCall("generate_report", kind, "");
+async function generateReport(kind, date = "") {
+  toast(date ? `正在生成 ${date} 的日报…` : (kind === "day" ? "正在生成日报…" : "正在生成周报…"));
+  const r = await apiCall("generate_report", kind, date);
   if (!r) { toast("未连接到后端"); return; }
   if (!r.ok) { toast(r.error); return; }
-  openModal(kind === "day" ? "今日日报" : "本周周报", `<div class="md-body">${mdToHtml(r.content)}</div>`, `保存位置：${escapeHtml(r.path)}`);
+  const title = kind === "week" ? "本周周报" : (date ? `${date} 日报` : "今日日报");
+  openModal(title, `<div class="md-body">${mdToHtml(r.content)}</div>`, `保存位置：${escapeHtml(r.path)}`);
   loadReports();
   if (!document.getElementById("page-home").hidden) loadHome();  // 总览页的最新报告卡跟随刷新
 }
@@ -1308,6 +1309,14 @@ document.getElementById("tl-desc").addEventListener("change", renderTimeline);
 document.getElementById("gen-day").addEventListener("click", () => generateReport("day"));
 document.getElementById("gen-week").addEventListener("click", () => generateReport("week"));
 document.getElementById("home-gen-day").addEventListener("click", () => generateReport("day"));
+// 指定日期日报：日期输入默认今天，生成时校验非空且不晚于今天
+document.getElementById("gen-day-date").value = todayStr();
+document.getElementById("gen-day-pick").addEventListener("click", () => {
+  const d = document.getElementById("gen-day-date").value;
+  if (!d) { toast("请先选择日期"); return; }
+  if (d > todayStr()) { toast("不能生成未来日期的日报"); return; }
+  generateReport("day", d);
+});
 document.getElementById("home-capture").addEventListener("click", startManualCapture);
 
 /* ===================== 启动 ===================== */
