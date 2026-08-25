@@ -47,6 +47,12 @@
 
 ## 变更日志（摘要）
 
+### 2026-08-25 新功能：生成指定日期的日报（fe718d7）
+- 日报周报页新增日期选择器 + 「生成该日日报」按钮（默认今天；校验非空、不允许未来日期）
+- 后端 `ui_api.generate_report(kind, date)` 原本就支持任意日期，本次纯前端入口改动
+- 端到端验证：用 8 月 4 日记录真实生成日报成功（DeepSeek 成果导向模板）；
+  无记录日期返回"该日无任何记录"
+
 ### 2026-08-25 代码审查修复（db_stats / clear_data / get_report）
 全量审查 Python 侧（app.py / ui_api.py / core/*），本轮修三处：
 - **db_stats 日志统计路径错**：还在扫 BASE_DIR 的 dailylog.log*，日志实际在 DATA_DIR → 数据管理页日志条数/容量恒为 0，已改扫 DATA_DIR
