@@ -976,24 +976,24 @@ async function loadSettings() {
   setupSelect("theme-pop", "theme-btn", Object.keys(THEMES),
     (v) => THEMES[v], (v) => { applyTheme(v); apiCall("set_theme", v); }, cfg.theme || "glass");
   setupSelect("interval-pop", "interval-btn", cfg.interval_choices || [5, 10, 15, 30, 60],
-    (m) => `每 ${m} 分钟`, (v) => { currentInterval = Number(v); }, currentInterval);
+    (m) => `每 ${m} 分钟`, (v) => { currentInterval = Number(v); autoSave(apiCall("set_interval", currentInterval), "截图间隔"); }, currentInterval);
   idleEnabled = cfg.idle_enabled !== false;
   currentIdleMin = cfg.idle_minutes || 5;
   setupSelect("idle-pop", "idle-btn", cfg.idle_choices || [1, 2, 5, 10, 15, 20, 30],
-    (m) => `${m} 分钟`, (v) => { currentIdleMin = Number(v); }, currentIdleMin);
+    (m) => `${m} 分钟`, (v) => { currentIdleMin = Number(v); autoSave(apiCall("set_idle", idleEnabled, currentIdleMin), "自动暂停"); }, currentIdleMin);
   document.getElementById("idle-enabled").checked = idleEnabled;
   document.getElementById("idle-btn").disabled = !idleEnabled;
   document.getElementById("idle-wrap").style.opacity = idleEnabled ? "1" : "0.45";
   document.getElementById("set-name").value = cfg.report_name || "";
   currentRetention = cfg.retention_days || 0;
   setupSelect("retention-pop", "retention-btn", cfg.retention_choices || [0, 7, 14, 30, 60, 90],
-    (d) => (Number(d) === 0 ? "永久保留" : `保留 ${Number(d)} 天`), (v) => { currentRetention = Number(v); }, currentRetention);
+    (d) => (Number(d) === 0 ? "永久保留" : `保留 ${Number(d)} 天`), (v) => { currentRetention = Number(v); autoSave(apiCall("set_retention", currentRetention), "记录保留"); }, currentRetention);
   dedupEnabled = cfg.dedup_enabled !== false;
   document.getElementById("dedup-enabled").checked = dedupEnabled;
   enterEnabled = !!cfg.enter_capture_enabled;
   currentEnterInterval = cfg.enter_capture_interval || 15;
   setupSelect("enter-pop", "enter-btn", cfg.enter_interval_choices || [5, 15, 30, 60],
-    (s) => `${s} 秒`, (v) => { currentEnterInterval = Number(v); }, currentEnterInterval);
+    (s) => `${s} 秒`, (v) => { currentEnterInterval = Number(v); autoSave(apiCall("set_enter_capture", enterEnabled, currentEnterInterval), "回车快速记录"); }, currentEnterInterval);
   document.getElementById("enter-enabled").checked = enterEnabled;
   document.getElementById("enter-btn").disabled = !enterEnabled;
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
@@ -1072,18 +1072,35 @@ function startManualCapture() {
 }
 document.getElementById("manual-capture").addEventListener("click", startManualCapture);
 
+/* 设置改动即保存（皮肤原本就是即时保存，其余项此前只在点"保存"时落盘，
+   改完直接关窗/退出会全部丢失）。失败弹 toast 提示，成功不打扰。 */
+function autoSave(call, label) {
+  Promise.resolve(call).then((r) => {
+    if (!r || !r.ok) toast((r && r.error) || `${label}保存失败`, 5000);
+  }).catch(() => toast(`${label}保存失败`, 5000));
+}
 document.getElementById("idle-enabled").addEventListener("change", (e) => {
   idleEnabled = e.target.checked;
   document.getElementById("idle-btn").disabled = !idleEnabled;
   document.getElementById("idle-wrap").style.opacity = idleEnabled ? "1" : "0.45";
+  autoSave(apiCall("set_idle", idleEnabled, currentIdleMin), "自动暂停");
 });
 document.getElementById("enter-enabled").addEventListener("change", (e) => {
   enterEnabled = e.target.checked;
   document.getElementById("enter-btn").disabled = !enterEnabled;
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
+  autoSave(apiCall("set_enter_capture", enterEnabled, currentEnterInterval), "回车快速记录");
 });
 document.getElementById("usage-enabled").addEventListener("change", (e) => {
   usageEnabled = e.target.checked;
+  autoSave(apiCall("set_usage_enabled", usageEnabled), "应用时长统计");
+});
+document.getElementById("dedup-enabled").addEventListener("change", (e) => {
+  dedupEnabled = e.target.checked; // 此前漏绑：点这个开关根本不生效
+  autoSave(apiCall("set_dedup", dedupEnabled), "跳过重复画面");
+});
+document.getElementById("set-name").addEventListener("change", (e) => {
+  autoSave(apiCall("set_report_name", e.target.value.trim()), "汇报人");
 });
 
 /* ===================== 待办页 ===================== */
