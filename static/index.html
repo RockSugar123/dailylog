@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>dailylog · 今日轨迹</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="style.css" />
+<script src="script.js" defer></script>
+</head>
+<body>
+<div class="app">
+
+  <!-- 氛围光层（纯装饰） -->
+  <div class="glow glow-teal" aria-hidden="true"></div>
+  <div class="glow glow-red" aria-hidden="true"></div>
+  <!-- 底部模糊色块（纯装饰，各主题换色） -->
+  <div class="fx-blobs" aria-hidden="true"></div>
+
+  <!-- 自定义标题栏（手动拖拽） -->
+  <header class="titlebar" id="titlebar">
+    <div class="tb-brand">dailylog<span class="tb-sub">今日轨迹</span></div>
+    <button class="tb-rec" id="rec-toggle" aria-pressed="true" title="截屏记录总开关">
+      <span class="rec-text" id="rec-label-tb">记录中</span>
+      <span class="rec-switch" aria-hidden="true"><span class="rec-knob"></span></span>
+    </button>
+    <div class="tb-controls">
+      <button class="tb-btn" id="win-min" aria-label="最小化">─</button>
+      <button class="tb-btn" id="win-max" aria-label="最大化">□</button>
+      <button class="tb-btn tb-close" id="win-close" aria-label="关闭到托盘">✕</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧图标竖栏 -->
+    <aside class="sidebar">
+      <nav class="side-nav">
+        <a class="side-item active" data-page="home" data-tip="今日总览"><span class="side-ico">✦</span><span class="side-txt">今日总览</span></a>
+        <a class="side-item" data-page="timeline" data-tip="时间线"><span class="side-ico">◉</span><span class="side-txt">时间线</span></a>
+        <a class="side-item" data-page="usage" data-tip="应用时长"><span class="side-ico">◔</span><span class="side-txt">应用时长</span></a>
+        <a class="side-item" data-page="todos" data-tip="待办"><span class="side-ico">☑</span><span class="side-txt">待办</span></a>
+        <a class="side-item" data-page="reports" data-tip="日报周报"><span class="side-ico">▤</span><span class="side-txt">日报周报</span></a>
+        <a class="side-item" data-page="logs" data-tip="日志"><span class="side-ico">☰</span><span class="side-txt">日志</span></a>
+        <a class="side-item" data-page="settings" data-tip="设置"><span class="side-ico">⚙</span><span class="side-txt">设置</span></a>
+      </nav>
+      <nav class="side-nav side-secondary">
+        <a class="side-item" id="side-privacy" data-tip="隐私保护"><span class="side-ico">♡</span><span class="side-txt">隐私保护</span></a>
+        <a class="side-item" id="side-about" data-tip="关于"><span class="side-ico">i</span><span class="side-txt">关于</span></a>
+      </nav>
+      <div class="side-foot"><span class="rec-dot" id="rec-dot"></span><span class="side-next" id="side-next"></span></div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="main">
+
+      <!-- ===== 今日总览页 ===== -->
+      <section class="page" id="page-home">
+        <div class="hero">
+          <span class="hero-title" id="home-greet">你好</span>
+          <span class="hero-date" id="home-date"></span>
+          <div class="hero-actions">
+            <button class="btn-ghost" id="home-capture">识别当前屏幕</button>
+            <button class="btn-primary" id="home-gen-day">↗ 生成今天日报</button>
+          </div>
+        </div>
+
+        <div class="ov-grid">
+          <!-- 专注时长环形 -->
+          <div class="ov-card ov-focus">
+            <svg class="ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="ring-bg" cx="50" cy="50" r="42"/>
+              <circle class="ring-fg" id="home-ring" cx="50" cy="50" r="42"/>
+            </svg>
+            <div>
+              <div class="focus-num" id="home-focus-num">–</div>
+              <div class="focus-sub">今日专注时长（估算）<br/>目标按 8h 工作日计</div>
+            </div>
+          </div>
+
+          <!-- 关键指标 -->
+          <div class="ov-card ov-stats">
+            <div class="mini"><div class="mini-v" id="home-count">–</div><div class="mini-l">今日记录</div></div>
+            <div class="mini"><div class="mini-v" id="home-active">–</div><div class="mini-l">活跃总时长</div></div>
+            <div class="mini mini-hot"><div class="mini-v" id="home-open-todos">–</div><div class="mini-l">待办未完成</div></div>
+            <div class="mini"><div class="mini-v" id="home-top-app">–</div><div class="mini-l">最常用应用</div></div>
+          </div>
+
+          <!-- 时间线预览 -->
+          <div class="ov-card ov-timeline">
+            <h3>最近记录 <span class="ov-more" data-goto="timeline">查看全部 →</span></h3>
+            <div id="home-tl"></div>
+          </div>
+
+          <!-- 应用时长 Top5 -->
+          <div class="ov-card ov-apps">
+            <h3>应用时长 Top 5 <span class="ov-more" data-goto="usage">详情 →</span></h3>
+            <div id="home-apps"></div>
+          </div>
+
+          <!-- 待办速览 -->
+          <div class="ov-card ov-todo">
+            <h3>待办速览 <span class="ov-more" data-goto="todos">全部待办 →</span></h3>
+            <div id="home-todo-list"></div>
+          </div>
+
+          <!-- 最新报告 -->
+          <div class="ov-card ov-report">
+            <div class="report-ico">▤</div>
+            <div class="report-info">
+              <div class="report-rt" id="home-report-name">还没有报告</div>
+              <div class="report-rs" id="home-report-meta">点右上角「生成今天日报」创建第一份</div>
+            </div>
+            <button class="btn-ghost report-go" id="home-report-open" hidden>打开</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 时间线页 ===== -->
+      <section class="page" id="page-timeline" hidden>
+        <div class="page-desc">查看全天工作活动轨迹，了解时间都花在了哪里</div>
+
+        <div class="filter-bar">
+          <div class="date-range">
+            <input type="date" id="range-start" aria-label="开始日期" />
+            <span class="date-split">至</span>
+            <input type="date" id="range-end" aria-label="结束日期" />
+            <div class="presets">
+              <button class="btn-ghost preset" data-days="1">今天</button>
+              <button class="btn-ghost preset" data-days="7">近7天</button>
+              <button class="btn-ghost preset" data-days="30">近30天</button>
+            </div>
+          </div>
+          <label class="switch-label"><input type="checkbox" id="tl-desc" checked /> 最新在上</label>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-value" id="st-count">–</div><div class="stat-label">记录条数</div></div>
+          <div class="stat-card"><div class="stat-value" id="st-range">–</div><div class="stat-label">活跃时段</div></div>
+          <div class="stat-card"><div class="stat-value" id="st-focus">–</div><div class="stat-label">专注时长（估算）</div></div>
+        </div>
+
+        <div class="panel" id="panel-cats" hidden>
+          <div class="panel-head">分类时长分布 <span class="hint">按记录间隔估算</span></div>
+          <div class="cat-list" id="cat-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">活动时间线 <span class="hint" id="tl-count"></span></div>
+          <div class="timeline" id="timeline"></div>
+        </div>
+      </section>
+
+      <!-- ===== 应用时长页 ===== -->
+      <section class="page" id="page-usage" hidden>
+        <div class="page-desc">统计各应用前台使用时长（每 2 分钟采样估算，空闲时段不计入，仅记录应用名）</div>
+
+        <div class="filter-bar">
+          <div class="date-range">
+            <div class="scope-group">
+              <button class="btn-ghost scope-btn" data-scope="day">日</button>
+              <button class="btn-ghost scope-btn" data-scope="week">周</button>
+              <button class="btn-ghost scope-btn" data-scope="month">月</button>
+            </div>
+            <input type="date" id="usage-date" aria-label="统计日期" />
+            <button class="btn-ghost preset" id="usage-today">今天</button>
+          </div>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card"><div class="stat-value" id="usage-total">–</div><div class="stat-label">总使用时长</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-apps">–</div><div class="stat-label">应用数</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-top-app">–</div><div class="stat-label">最常用应用</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-top-hour">–</div><div class="stat-label">最活跃时段</div></div>
+          <div class="stat-card"><div class="stat-value" id="usage-days">–</div><div class="stat-label">统计天数</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">应用时长分布 <span class="hint">按采样次数估算，粒度 2 分钟</span>
+            <span class="set-spacer"></span>
+            <div class="chart-bar">
+              <button class="btn-ghost chart-btn active" data-chart="bar">柱状图</button>
+              <button class="btn-ghost chart-btn" data-chart="pie">饼图</button>
+            </div>
+          </div>
+          <div id="chart-area"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">详细列表 <span class="hint">Top 20</span></div>
+          <table class="usage-table">
+            <thead><tr>
+              <th>应用名称</th><th>使用时长</th><th>占比</th><th>会话次数</th><th>平均会话</th><th>最长连续</th><th>首次使用</th><th>最后使用</th>
+            </tr></thead>
+            <tbody id="usage-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">时段分布 <span class="hint" id="usage-bucket-label">按小时统计使用强度</span></div>
+          <div class="cat-list" id="usage-buckets"></div>
+        </div>
+      </section>
+
+      <!-- ===== 待办页 ===== -->
+      <section class="page" id="page-todos" hidden>
+        <div class="page-desc">截图分析会自动提取待办，也可以手动新建；勾选即完成</div>
+
+        <div class="filter-bar">
+          <button class="btn-primary" id="todo-add">＋ 新建待办</button>
+          <div class="select-wrap" id="todo-status-wrap">
+            <button class="select-btn" id="todo-status-btn">全部状态<span class="caret">▾</span></button>
+            <div class="select-pop" id="todo-status-pop" hidden></div>
+          </div>
+          <div class="select-wrap" id="todo-priority-wrap">
+            <button class="select-btn" id="todo-priority-btn">全部优先级<span class="caret">▾</span></button>
+            <div class="select-pop" id="todo-priority-pop" hidden></div>
+          </div>
+          <input type="search" id="todo-search" class="todo-search" placeholder="搜索待办" />
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">待办列表 <span class="hint" id="todo-count"></span></div>
+          <div class="todo-list" id="todo-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== 日报周报页 ===== -->
+      <section class="page" id="page-reports" hidden>
+        <div class="page-desc">从时间线归纳成果、进展与待办，写周报不再从零开始</div>
+
+        <div class="report-actions">
+          <button class="btn-primary" id="gen-day">↗ 生成今天的日报</button>
+          <button class="btn-ghost" id="gen-week">↗ 生成本周周报</button>
+          <span class="report-actions-sep"></span>
+          <input type="date" id="gen-day-date" class="date-input" aria-label="选择日期" />
+          <button class="btn-ghost" id="gen-day-pick">↗ 生成该日日报</button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">历史报告 <span class="hint" id="report-count"></span></div>
+          <div class="report-list" id="report-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== 日志页 ===== -->
+      <section class="page" id="page-logs" hidden>
+        <div class="page-desc">运行日志：查看记录与分析报错原因（最新在前，60 秒自动刷新）</div>
+        <div class="panel">
+          <div class="panel-head">日志 <span class="hint" id="logs-count"></span>
+            <button class="btn-ghost" id="logs-refresh" style="float:right">刷新</button>
+          </div>
+          <div class="logs-list" id="logs-list"></div>
+        </div>
+      </section>
+
+      <!-- ===== 设置页 ===== -->
+      <section class="page" id="page-settings" hidden>
+        <div class="page-desc">配置截屏记录、模型通道与数据管理</div>
+
+        <div class="panel">
+          <div class="panel-head">截图与记录</div>
+          <div class="settings-row">
+            <label for="theme-btn">界面皮肤</label>
+            <div class="select-wrap" id="theme-wrap">
+              <button class="select-btn" id="theme-btn">玻璃拟态<span class="caret">▾</span></button>
+              <div class="select-pop" id="theme-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label for="set-interval">截图间隔</label>
+            <div class="select-wrap" id="interval-wrap">
+              <button class="select-btn" id="interval-btn">每 10 分钟<span class="caret">▾</span></button>
+              <div class="select-pop" id="interval-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label for="set-name">汇报人</label>
+            <input type="text" id="set-name" maxlength="20" placeholder="留空则不输出" />
+          </div>
+          <div class="settings-row">
+            <label>自动暂停</label>
+            <label class="switch-label"><input type="checkbox" id="idle-enabled" checked /> 鼠标静止时暂停截屏</label>
+            <div class="select-wrap" id="idle-wrap">
+              <button class="select-btn" id="idle-btn">5 分钟<span class="caret">▾</span></button>
+              <div class="select-pop" id="idle-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label for="retention-btn">记录保留</label>
+            <div class="select-wrap" id="retention-wrap">
+              <button class="select-btn" id="retention-btn">永久保留<span class="caret">▾</span></button>
+              <div class="select-pop" id="retention-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="hint">时间线、日报/周报、应用时长超过保留天数后自动删除；截图始终用完即删，磁盘不保留</span>
+          </div>
+          <div class="settings-row">
+            <label>跳过重复画面</label>
+            <label class="switch-label"><input type="checkbox" id="dedup-enabled" checked /> 画面与上次几乎相同时跳过识别</label>
+          </div>
+          <div class="settings-row">
+            <label>回车键快速记录</label>
+            <label class="switch-label"><input type="checkbox" id="enter-enabled" /> 全局监听回车键，按下即截屏识别保存</label>
+            <div class="select-wrap" id="enter-wrap">
+              <button class="select-btn" id="enter-btn">15 秒<span class="caret">▾</span></button>
+              <div class="select-pop" id="enter-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label>应用时长统计</label>
+            <label class="switch-label"><input type="checkbox" id="usage-enabled" checked /> 每 2 分钟采样前台应用，统计各应用使用时长</label>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <button class="btn-primary" id="set-save">保存</button>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint">5 秒后截取当前屏幕并记录</span>
+            <button class="btn-primary" id="manual-capture">识别当前屏幕</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">数据管理</div>
+          <div class="settings-row">
+            <label>导出数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">导出为 JSON 备份（记录、报告与待办）</span>
+            <button class="btn-primary" id="export-data">↓ 导出</button>
+          </div>
+          <div class="settings-row">
+            <label>导入数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">从 JSON 备份恢复本地数据</span>
+            <button class="btn-primary" id="import-data">↑ 导入</button>
+          </div>
+          <div class="settings-row">
+            <label>清除历史数据</label>
+            <span class="set-spacer"></span>
+            <span class="hint">删除本地数据和日志，保留 API Key 配置</span>
+            <button class="btn-danger" id="clear-data">🗑 删除</button>
+          </div>
+          <div class="settings-row">
+            <label>当前本地数据库文件大小</label>
+            <span class="set-spacer"></span>
+            <span class="hint">包含数据库文件占用、时间线、报告和本地日志统计</span>
+          </div>
+          <div class="db-stats" id="db-stats">
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">容量</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">时间线</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">报告</div></div>
+            <div class="db-stat"><div class="db-value">–</div><div class="db-label">其他日志</div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">当前状态</div>
+          <dl class="settings-status" id="settings-status"></dl>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- 无边框窗口：右下角缩放手柄 -->
+  <div class="resize-grip" id="resize-grip" title="拖动缩放窗口"></div>
+</div>
+
+<!-- 弹窗层 -->
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal" id="modal" role="dialog">
+    <header class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" id="modal-close" aria-label="关闭">×</button>
+    </header>
+    <div class="modal-body" id="modal-body"></div>
+    <footer class="modal-foot" id="modal-foot" hidden></footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+</body>
+</html>

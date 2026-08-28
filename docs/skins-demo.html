@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>dailylog 新皮肤提案 Demo（未接入正式代码）</title>
+<style>
+/* ===================== Demo 页框架（与皮肤无关） ===================== */
+* { box-sizing: border-box }
+body { margin:0; padding:38px 26px 70px; background:#101216; font-family:"Segoe UI","Microsoft YaHei",sans-serif; color:#cfd4dd }
+.intro { max-width:1080px; margin:0 auto 34px }
+.intro h1 { font-size:19px; margin:0 0 8px; color:#fff }
+.intro p { margin:6px 0 0; font-size:13px; line-height:1.85; color:#8b93a3 }
+.stage { max-width:1080px; margin:0 auto; display:grid; gap:44px }
+.proposal h2 { font-size:15px; margin:0 0 4px; color:#fff }
+.proposal > p { margin:0 0 12px; font-size:12.5px; color:#8b93a3 }
+.note { max-width:1080px; margin:44px auto 0; font-size:12.5px; line-height:1.9; color:#6d7686; border-top:1px solid #232833; padding-top:18px }
+/* ===================== Mock 骨架：复刻 dailylog 主界面结构 ===================== */
+.mock {
+  --bg:#14161c; --raised:#191c24; --ink:#e8ebf2; --sub:#9aa3b5; --faint:#667088;
+  --panel-bg:rgba(255,255,255,.05); --border:rgba(255,255,255,.13);
+  --brand:#ff6b4a; --brand-ink:#fff; --brand-soft:rgba(255,107,74,.15);
+  --warn:#ffd27f; --warn-bg:rgba(255,210,127,.12); --danger:#ff9c9c;
+  --track:rgba(128,128,128,.22);
+  --r-panel:12px; --r-btn:8px; --r-item:8px;
+  --font-ui:"Segoe UI","Microsoft YaHei",sans-serif;
+  --font-sign:"Segoe UI",sans-serif;
+  --item-active:transparent;
+  --grid:none; --grid-size:100% 100%;
+  position:relative; height:520px;
+  display:flex; flex-direction:column;
+  background:var(--bg); color:var(--ink);
+  border-radius:14px; overflow:hidden;
+  box-shadow:0 24px 70px rgba(0,0,0,.45);
+  font-family:var(--font-ui);
+  isolation:isolate;
+}
+.m-titlebar {
+  height:44px; flex:none;
+  display:flex; align-items:center; gap:10px;
+  padding:0 14px 0 18px;
+  background:var(--raised); border-bottom:1px solid var(--border);
+}
+.m-brand { font-family:var(--font-sign); font-size:16px }
+.m-sub { font-size:11px; color:var(--faint); letter-spacing:.14em }
+.m-rec {
+  margin-left:auto;
+  display:inline-flex; align-items:center; gap:8px;
+  height:27px; padding:0 12px; font-size:12px; color:var(--sub);
+  background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--r-btn);
+}
+.m-dot { width:8px; height:8px; border-radius:50%; background:var(--brand); animation:pulse 1.6s infinite }
+@keyframes pulse { 50% { opacity:.3 } }
+.m-body { flex:1; display:flex; min-height:0 }
+.m-side {
+  width:168px; flex:none;
+  padding:14px 10px;
+  display:flex; flex-direction:column; gap:3px;
+  background:var(--raised); border-right:1px solid var(--border);
+}
+.m-item { position:relative; padding:8px 12px; font-size:13px; color:var(--sub); border-radius:var(--r-item); cursor:pointer }
+.m-item.active { color:var(--ink); background:var(--item-active) }
+.m-foot { margin-top:auto; padding:10px 12px 0; font-size:11px; color:var(--faint); border-top:1px solid var(--border) }
+.m-main { flex:1; min-width:0; position:relative; padding:16px 18px; overflow:hidden; display:flex; flex-direction:column }
+.m-main::before {
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background-image:var(--grid); background-size:var(--grid-size);
+}
+.m-stats { display:flex; gap:12px; margin-bottom:14px }
+.m-card { flex:1; padding:13px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--r-panel) }
+.m-card small { display:block; font-size:11px; letter-spacing:.08em; color:var(--sub); margin-bottom:7px }
+.m-card b { font-family:var(--font-sign); font-size:24px; font-weight:600 }
+.m-panel { padding:14px 16px 15px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--r-panel); margin-bottom:14px }
+.m-head { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; margin-bottom:12px }
+.m-head::before { content:""; width:4px; height:13px; border-radius:2px; background:var(--brand) }
+.m-brow { display:flex; align-items:center; gap:10px; margin-bottom:9px; font-size:12px; color:var(--sub) }
+.m-brow:last-child { margin-bottom:0 }
+.m-brow em { width:42px; flex:none; font-style:normal }
+.m-track { flex:1; height:8px; border-radius:99px; background:var(--track); overflow:hidden }
+.m-fill { display:block; height:100%; width:var(--w); border-radius:inherit; background:var(--brand) }
+.m-pct { width:36px; flex:none; text-align:right; font-family:var(--font-sign); font-size:11px; color:var(--faint) }
+.m-tl { position:relative; padding-left:22px }
+.m-tl::before { content:""; position:absolute; left:4px; top:5px; bottom:4px; width:2px; border-radius:2px; background:var(--tl-line,var(--border)) }
+.m-tli { position:relative; margin-bottom:11px; font-size:12.5px }
+.m-tli:last-child { margin-bottom:0 }
+.m-tli::before {
+  content:""; position:absolute; left:-22px; top:4px;
+  width:9px; height:9px; border-radius:50%;
+  background:var(--brand); box-shadow:0 0 0 3px var(--bg);
+}
+.m-tli time { font-family:var(--font-sign); font-size:11px; color:var(--faint); margin-right:9px }
+.m-tli p { display:inline; margin:0 }
+.m-tag { display:inline-block; margin-left:8px; padding:1.5px 9px; font-size:10.5px; border-radius:99px; background:var(--brand-soft); color:var(--brand) }
+.m-tag.warn { background:var(--warn-bg); color:var(--warn) }
+.m-actions { margin-top:auto; padding-top:14px; display:flex; gap:10px }
+.m-btn { padding:8px 18px; font-size:12.5px; font-family:inherit; border-radius:var(--r-btn); border:1px solid transparent; background:none; color:var(--sub); cursor:pointer }
+.m-btn.primary { background:var(--brand); color:var(--brand-ink); font-weight:600 }
+.m-btn.ghost { border-color:var(--border) }
+.m-btn.danger { color:var(--danger) }
+/* ===== 方案 E · 墨绿终端（terminal）===== */
+.skin-terminal {
+  --bg:#0b1210; --raised:#0f1814; --ink:#d7e8dc; --sub:#83a592; --faint:#55705f;
+  --panel-bg:rgba(215,232,220,.045); --border:#21372c;
+  --brand:#42d98c; --brand-ink:#04180d; --brand-soft:rgba(66,217,140,.13);
+  --warn:#d9b44a; --warn-bg:rgba(217,180,74,.12); --danger:#ff8078;
+  --track:rgba(215,232,220,.09);
+  --r-panel:3px; --r-btn:3px; --r-item:3px;
+  --font-ui:"Cascadia Code",Consolas,"Microsoft YaHei",monospace;
+  --font-sign:"Cascadia Code",Consolas,monospace;
+  --item-active:rgba(66,217,140,.1);
+  --grid:
+    linear-gradient(rgba(130,190,155,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(130,190,155,.05) 1px, transparent 1px);
+  --grid-size:26px 26px;
+}
+/* CRT 扫描线覆盖层 */
+.skin-terminal::after {
+  content:""; position:absolute; inset:0; z-index:9; pointer-events:none; opacity:.4;
+  background:repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+}
+.skin-terminal .m-item.active { box-shadow:inset 2px 0 0 var(--brand); border-radius:0 }
+.skin-terminal .m-sub { letter-spacing:.24em }
+.skin-terminal .m-dot { border-radius:1px }
+
+/* ===== 方案 F · 深海蓝调（abyss）===== */
+.skin-abyss {
+  --bg:#0a1120; --raised:#0d1526; --ink:#e5edfb; --sub:#93a5c4; --faint:#5a6b8c;
+  --panel-bg:rgba(148,184,255,.055); --border:rgba(148,184,255,.15);
+  --brand:#4cc3ff; --brand-ink:#03233d; --brand-soft:rgba(76,195,255,.14);
+  --warn:#ffce6b; --warn-bg:rgba(255,206,107,.12); --danger:#ff9aa8;
+  --track:rgba(148,184,255,.12);
+  --r-panel:11px; --r-btn:8px; --r-item:9px;
+  --font-ui:"Segoe UI","Microsoft YaHei",sans-serif;
+  --font-sign:"Segoe UI",sans-serif;
+  --item-active:rgba(76,195,255,.12);
+  --grid:
+    linear-gradient(rgba(130,160,230,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(130,160,230,.04) 1px, transparent 1px);
+  --grid-size:32px 32px;
+}
+/* 青 + 紫双极光 */
+.skin-abyss::after {
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(circle at 84% 94%, rgba(76,195,255,.17), transparent 55%),
+    radial-gradient(circle at 6% 2%, rgba(139,109,255,.14), transparent 42%);
+}
+/* ===== 方案 G · 胶片暗房（film）===== */
+.skin-film {
+  --bg:#171310; --raised:#1d1712; --ink:#efe4d3; --sub:#ab9782; --faint:#77675a;
+  --panel-bg:rgba(239,228,211,.05); --border:rgba(239,228,211,.13);
+  --brand:#ffa02e; --brand-ink:#241300; --brand-soft:rgba(255,160,46,.13);
+  --warn:#e2574b; --warn-bg:rgba(226,87,75,.14); --danger:#ff8d80;
+  --track:rgba(239,228,211,.1);
+  --r-panel:5px; --r-btn:4px; --r-item:5px;
+  --font-ui:"Segoe UI","Microsoft YaHei",sans-serif;
+  --font-sign:Georgia,"Songti SC",SimSun,serif;
+  --item-active:rgba(255,160,46,.1);
+}
+/* 胶片颗粒 + 暗角 */
+.skin-film::after {
+  content:""; position:absolute; inset:0; z-index:9; pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,.016) 0 1px, transparent 1px 2px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.014) 0 1px, transparent 1px 2px),
+    radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.44));
+}
+.skin-film .m-brand { font-style:italic }
+.skin-film .m-tl-line, .skin-film .m-tl::before { background:#4a3c2c }
+
+/* ===== 方案 H · 薄荷汽水（mint）===== */
+.skin-mint {
+  color-scheme:light;
+  --bg:#eff8f4; --raised:#ffffff; --ink:#16352b; --sub:#5f8175; --faint:#9dbcb1;
+  --panel-bg:#ffffff; --border:#dbebe4;
+  --brand:#0eaa7d; --brand-ink:#ffffff; --brand-soft:rgba(14,170,125,.12);
+  --warn:#c28a1d; --warn-bg:rgba(194,138,29,.12); --danger:#d95c4a;
+  --track:#e3f0ea;
+  --r-panel:14px; --r-btn:99px; --r-item:10px;
+  --font-ui:"Segoe UI","Microsoft YaHei",sans-serif;
+  --font-sign:"Segoe UI",sans-serif;
+  --item-active:#ffffff;
+  box-shadow:0 20px 60px rgba(22,53,43,.18);
+}
+.skin-mint .m-side { background:#f7fcfa; border-right-color:#e4f0ea }
+.skin-mint .m-titlebar { border-bottom-color:#e4f0ea }
+.skin-mint .m-item.active { box-shadow:0 4px 14px rgba(22,53,43,.09) }
+.skin-mint .m-card, .skin-mint .m-panel { box-shadow:0 3px 14px rgba(22,53,43,.05) }
+.skin-mint .m-fill { background:linear-gradient(90deg,#17c78f,#0ea5cf) }
+.skin-mint::after {
+  content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(circle at 92% -6%, rgba(23,199,143,.15), transparent 34%),
+    radial-gradient(circle at 2% 104%, rgba(14,165,207,.13), transparent 36%);
+}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>dailylog · 新皮肤提案（Demo）</h1>
+  <p>以下 4 个候选皮肤仅作视觉预览，<b>未接入任何正式代码</b>。每个方案用主界面核心元素（标题栏 / 侧栏 / 统计卡 / 分类条 / 时间线 / 按钮）模拟真实观感。<b>每个卡片内点击可预览「点击特效」，平时可见常驻环境粒子。</b></p>
+  <p>确认方案后按现有皮肤架构接入：style.css 加 body.theme-xxx 块、script.js 的 THEMES 表、ui_api.py 的 set_theme 白名单。也可组合微调（如「F 的配色 + E 的等宽字体」）。</p>
+</div>
+<div class="stage">
+<section class="proposal">
+  <h2>方案 E · 墨绿终端（terminal）</h2>
+  <p>暗色。深墨绿底 + 荧光绿信号色，全局等宽字体，直角细边框面板，CRT 扫描线质感。「工程感/极客感」最强，与现有三款差异最大。</p>
+  <div class="mock skin-terminal">
+    <div class="m-titlebar"><span class="m-brand">dailylog</span><span class="m-sub">WORK LOGGER</span><span class="m-rec"><i class="m-dot"></i>记录中</span></div>
+    <div class="m-body">
+      <aside class="m-side">
+        <div class="m-item active">概览</div><div class="m-item">时间线</div><div class="m-item">报告</div><div class="m-item">待办</div>
+        <div class="m-foot">v1.4 · 本地运行</div>
+      </aside>
+      <main class="m-main">
+        <div class="m-stats">
+          <div class="m-card"><small>今日时长</small><b>2h30m</b></div>
+          <div class="m-card"><small>记录条数</small><b>18</b></div>
+          <div class="m-card"><small>项目数</small><b>4</b></div>
+        </div>
+        <section class="m-panel">
+          <header class="m-head">分类分布</header>
+          <div class="m-brow"><em>开发</em><span class="m-track"><i class="m-fill" style="--w:46%"></i></span><span class="m-pct">46%</span></div>
+          <div class="m-brow"><em>会议</em><span class="m-track"><i class="m-fill" style="--w:21%"></i></span><span class="m-pct">21%</span></div>
+          <div class="m-brow"><em>学习</em><span class="m-track"><i class="m-fill" style="--w:14%"></i></span><span class="m-pct">14%</span></div>
+        </section>
+        <section class="m-panel">
+          <header class="m-head">时间线</header>
+          <div class="m-tl">
+            <div class="m-tli"><time>21:04</time><p>修复 tooltip 配色问题<span class="m-tag">开发</span></p></div>
+            <div class="m-tli"><time>20:37</time><p>整理周报草稿并归档<span class="m-tag warn">文档</span></p></div>
+          </div>
+          <div class="m-actions">
+            <button class="m-btn primary">生成日报</button><button class="m-btn ghost">刷新数据</button><button class="m-btn danger">清空记录</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="proposal">
+  <h2>方案 F · 深海蓝调（abyss）</h2>
+  <p>暗色。海军蓝底 + 天青强调色，右上紫、右下青双极光辉光，保留玻璃拟态的通透感但整体换成冷静蓝系。</p>
+  <div class="mock skin-abyss">
+    <div class="m-titlebar"><span class="m-brand">dailylog</span><span class="m-sub">WORK LOGGER</span><span class="m-rec"><i class="m-dot"></i>记录中</span></div>
+    <div class="m-body">
+      <aside class="m-side">
+        <div class="m-item active">概览</div><div class="m-item">时间线</div><div class="m-item">报告</div><div class="m-item">待办</div>
+        <div class="m-foot">v1.4 · 本地运行</div>
+      </aside>
+      <main class="m-main">
+        <div class="m-stats">
+          <div class="m-card"><small>今日时长</small><b>2h30m</b></div>
+          <div class="m-card"><small>记录条数</small><b>18</b></div>
+          <div class="m-card"><small>项目数</small><b>4</b></div>
+        </div>
+        <section class="m-panel">
+          <header class="m-head">分类分布</header>
+          <div class="m-brow"><em>开发</em><span class="m-track"><i class="m-fill" style="--w:46%"></i></span><span class="m-pct">46%</span></div>
+          <div class="m-brow"><em>会议</em><span class="m-track"><i class="m-fill" style="--w:21%"></i></span><span class="m-pct">21%</span></div>
+          <div class="m-brow"><em>学习</em><span class="m-track"><i class="m-fill" style="--w:14%"></i></span><span class="m-pct">14%</span></div>
+        </section>
+        <section class="m-panel">
+          <header class="m-head">时间线</header>
+          <div class="m-tl">
+            <div class="m-tli"><time>21:04</time><p>修复 tooltip 配色问题<span class="m-tag">开发</span></p></div>
+            <div class="m-tli"><time>20:37</time><p>整理周报草稿并归档<span class="m-tag warn">文档</span></p></div>
+          </div>
+          <div class="m-actions">
+            <button class="m-btn primary">生成日报</button><button class="m-btn ghost">刷新数据</button><button class="m-btn danger">清空记录</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</section>
+<section class="proposal">
+  <h2>方案 G · 胶片暗房（film）</h2>
+  <p>暖黑。棕黑底 + 琥珀安全灯色，胶片颗粒 + 暗角，品牌字用衬线斜体，复古摄影棚氛围。</p>
+  <div class="mock skin-film">
+    <div class="m-titlebar"><span class="m-brand">dailylog</span><span class="m-sub">WORK LOGGER</span><span class="m-rec"><i class="m-dot"></i>记录中</span></div>
+    <div class="m-body">
+      <aside class="m-side">
+        <div class="m-item active">概览</div><div class="m-item">时间线</div><div class="m-item">报告</div><div class="m-item">待办</div>
+        <div class="m-foot">v1.4 · 本地运行</div>
+      </aside>
+      <main class="m-main">
+        <div class="m-stats">
+          <div class="m-card"><small>今日时长</small><b>2h30m</b></div>
+          <div class="m-card"><small>记录条数</small><b>18</b></div>
+          <div class="m-card"><small>项目数</small><b>4</b></div>
+        </div>
+        <section class="m-panel">
+          <header class="m-head">分类分布</header>
+          <div class="m-brow"><em>开发</em><span class="m-track"><i class="m-fill" style="--w:46%"></i></span><span class="m-pct">46%</span></div>
+          <div class="m-brow"><em>会议</em><span class="m-track"><i class="m-fill" style="--w:21%"></i></span><span class="m-pct">21%</span></div>
+          <div class="m-brow"><em>学习</em><span class="m-track"><i class="m-fill" style="--w:14%"></i></span><span class="m-pct">14%</span></div>
+        </section>
+        <section class="m-panel">
+          <header class="m-head">时间线</header>
+          <div class="m-tl">
+            <div class="m-tli"><time>21:04</time><p>修复 tooltip 配色问题<span class="m-tag">开发</span></p></div>
+            <div class="m-tli"><time>20:37</time><p>整理周报草稿并归档<span class="m-tag warn">文档</span></p></div>
+          </div>
+          <div class="m-actions">
+            <button class="m-btn primary">生成日报</button><button class="m-btn ghost">刷新数据</button><button class="m-btn danger">清空记录</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</section>
+
+<section class="proposal">
+  <h2>方案 H · 薄荷汽水（mint）</h2>
+  <p>亮色。薄荷白底 + 翠绿→青蓝渐变强调，大圆角卡片软阴影、胶囊按钮，四款里最清爽的一档（与 paper/journal 亮色系错开）。</p>
+  <div class="mock skin-mint">
+    <div class="m-titlebar"><span class="m-brand">dailylog</span><span class="m-sub">WORK LOGGER</span><span class="m-rec"><i class="m-dot"></i>记录中</span></div>
+    <div class="m-body">
+      <aside class="m-side">
+        <div class="m-item active">概览</div><div class="m-item">时间线</div><div class="m-item">报告</div><div class="m-item">待办</div>
+        <div class="m-foot">v1.4 · 本地运行</div>
+      </aside>
+      <main class="m-main">
+        <div class="m-stats">
+          <div class="m-card"><small>今日时长</small><b>2h30m</b></div>
+          <div class="m-card"><small>记录条数</small><b>18</b></div>
+          <div class="m-card"><small>项目数</small><b>4</b></div>
+        </div>
+        <section class="m-panel">
+          <header class="m-head">分类分布</header>
+          <div class="m-brow"><em>开发</em><span class="m-track"><i class="m-fill" style="--w:46%"></i></span><span class="m-pct">46%</span></div>
+          <div class="m-brow"><em>会议</em><span class="m-track"><i class="m-fill" style="--w:21%"></i></span><span class="m-pct">21%</span></div>
+          <div class="m-brow"><em>学习</em><span class="m-track"><i class="m-fill" style="--w:14%"></i></span><span class="m-pct">14%</span></div>
+        </section>
+        <section class="m-panel">
+          <header class="m-head">时间线</header>
+          <div class="m-tl">
+            <div class="m-tli"><time>21:04</time><p>修复 tooltip 配色问题<span class="m-tag">开发</span></p></div>
+            <div class="m-tli"><time>20:37</time><p>整理周报草稿并归档<span class="m-tag warn">文档</span></p></div>
+          </div>
+          <div class="m-actions">
+            <button class="m-btn primary">生成日报</button><button class="m-btn ghost">刷新数据</button><button class="m-btn danger">清空记录</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</section>
+</div>
+<p class="note">提示：demo 为静态近似效果；正式接入会覆盖全部真实组件（弹窗、表格、日志页、滚动条、tooltip 等），细节以实际运行为准。</p>
+<script>
+/* ===== 交互特效 demo：每个 mock 常驻环境粒子 + 点击迸发特效 ===== */
+const AMBIENT = {
+  terminal: { n: 16, init(w, h, any) { return { x: Math.random() * w, y: any ? Math.random() * h : -12, v: .25 + Math.random() * .5, c: "01<>/#$;:".charAt(Math.random() * 8 | 0), a: .14 + Math.random() * .22 }; } },
+  abyss:    { n: 10, init(w, h, any) { return { x: Math.random() * w, y: any ? Math.random() * h : h + 8, r: 1.5 + Math.random() * 2.5, v: .3 + Math.random() * .5, ph: Math.random() * 6 }; } },
+  film:     { n: 14, init(w, h, any) { return { x: Math.random() * w, y: any ? Math.random() * h : -6, v: .12 + Math.random() * .3, r: .8 + Math.random() * 1.8, big: Math.random() < .18, ph: Math.random() * 6, a: .05 + Math.random() * .13 }; } },
+  mint:     { n: 9,  init(w, h, any) { return { x: Math.random() * w, y: any ? Math.random() * h : h + 8, r: 2 + Math.random() * 3, v: .25 + Math.random() * .4, ph: Math.random() * 6 }; } },
+};
+const scenes = [];
+document.querySelectorAll(".mock").forEach(mock => {
+  const skin = [...mock.classList].find(c => c.startsWith("skin-")).slice(5);
+  const cv = document.createElement("canvas");
+  cv.style.cssText = "position:absolute;left:0;top:0;z-index:8;pointer-events:none";
+  mock.appendChild(cv);
+  const ctx = cv.getContext("2d");
+  const fit = () => { cv.width = mock.clientWidth; cv.height = mock.clientHeight; };
+  fit(); new ResizeObserver(fit).observe(mock);
+  const A = AMBIENT[skin], parts = [], bursts = [];
+  for (let i = 0; i < A.n; i++) parts.push(A.init(cv.width, cv.height, true));
+  mock.addEventListener("pointerdown", e => {
+    const r = mock.getBoundingClientRect();
+    bursts.push({ x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() });
+  });
+  scenes.push({ skin, cv, ctx, parts, bursts });
+});
+function drawBurst(ctx, skin, x, y, t) {
+  const fade = 1 - t;
+  if (skin === "terminal") {
+    const s1 = 12 + t * 36;
+    ctx.strokeStyle = `rgba(66,217,140,${fade})`; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - s1, y - s1, s1 * 2, s1 * 2);
+    const s2 = 6 + Math.max(0, t - .18) * 44;
+    ctx.strokeStyle = `rgba(66,217,140,${fade * .6})`;
+    ctx.strokeRect(x - s2, y - s2, s2 * 2, s2 * 2);
+    ctx.fillStyle = `rgba(130,240,180,${fade})`;
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .4; ctx.fillRect(x + Math.cos(a) * t * 34 - 1.5, y + Math.sin(a) * t * 34 - 1.5, 3, 3); }
+  } else if (skin === "abyss") {
+    for (let i = 0; i < 3; i++) {
+      const r = 5 + i * 8 + t * (40 + i * 16);
+      ctx.strokeStyle = `rgba(120,200,255,${fade * (0.85 - i * 0.22)})`;
+      ctx.lineWidth = 1.6 - i * 0.4;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke();
+    }
+  } else if (skin === "film") {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 20 + t * 56);
+    g.addColorStop(0, `rgba(255,214,160,${fade * .3})`); g.addColorStop(1, "rgba(255,214,160,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 20 + t * 56, 0, 7); ctx.fill();
+    ctx.fillStyle = `rgba(255,200,140,${fade * .55})`;
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .8; ctx.beginPath(); ctx.arc(x + Math.cos(a) * t * 40, y + Math.sin(a) * t * 40, 2.4, 0, 7); ctx.fill(); }
+  } else if (skin === "mint") {
+    ctx.strokeStyle = `rgba(14,170,125,${fade})`; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(x, y, 4 + t * 30, 0, 7); ctx.stroke();
+    ctx.fillStyle = `rgba(23,199,143,${fade})`;
+    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + .3; ctx.beginPath(); ctx.arc(x + Math.cos(a) * t * 26, y + Math.sin(a) * t * 26 - t * 6, 2.2, 0, 7); ctx.fill(); }
+  }
+}
+function tick(now) {
+  for (const s of scenes) {
+    const { ctx, cv, skin, parts, bursts } = s, w = cv.width, h = cv.height;
+    ctx.clearRect(0, 0, w, h);
+    for (const p of parts) {
+      if (skin === "terminal") {
+        p.y += p.v; if (p.y > h + 12) Object.assign(p, AMBIENT.terminal.init(w, h, false));
+        ctx.fillStyle = `rgba(102,220,150,${p.a})`; ctx.font = "10px Consolas,monospace"; ctx.fillText(p.c, p.x, p.y);
+      } else if (skin === "abyss") {
+        p.y -= p.v; p.x += Math.sin(p.ph += .01) * .3; if (p.y < -10) Object.assign(p, AMBIENT.abyss.init(w, h, false));
+        ctx.strokeStyle = "rgba(140,200,255,.38)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.stroke();
+      } else if (skin === "film") {
+        p.y += p.v; p.x += Math.sin(p.ph += .006) * .2; if (p.y > h + 8) Object.assign(p, AMBIENT.film.init(w, h, false));
+        ctx.fillStyle = `rgba(255,225,180,${p.big ? .05 : p.a})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.big ? p.r * 3 : p.r, 0, 7); ctx.fill();
+      } else if (skin === "mint") {
+        p.y -= p.v; p.x += Math.sin(p.ph += .012) * .35; if (p.y < -10) Object.assign(p, AMBIENT.mint.init(w, h, false));
+        ctx.fillStyle = "rgba(23,199,143,.28)";
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+      }
+    }
+    for (let i = bursts.length - 1; i >= 0; i--) {
+      const b = bursts[i], t = (now - b.t) / 700;
+      if (t >= 1) { bursts.splice(i, 1); continue; }
+      drawBurst(ctx, skin, b.x, b.y, t);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

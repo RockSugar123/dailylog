@@ -1,0 +1,24 @@
+# API 密钥（绝不可提交）
+.env
+
+# 运行时数据（个人工作记录、密钥、日志，全部在 data/ 下）
+data/
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.idea/
+
+# 打包中间产物（部署目录在项目外：%~dp0..\dailylog-app）
+build/
+dist_build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地工具缓存
+.playwright-cli/
