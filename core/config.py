@@ -48,18 +48,120 @@ def setup_logging() -> logging.Logger:
     logger.addHandler(handler)
     return logger
 
-# 截图分析 API（阿里云百炼 DashScope OpenAI 兼容端点）
-ANALYZE_API_KEY = os.getenv("ANALYZE_API_KEY", "").strip()
-ANALYZE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-ANALYZE_MODEL = "qwen3.5-omni-plus-2026-03-15"
+# 模型服务预设：官方 OpenAI 兼容端点，均支持多模态（截图分析需要视觉能力）。
+# 设置页选供应商后用户只填模型名称 + Key；custom 时接口地址也由用户填。
+# base_url 以代码为准（用户改不了官方端点），settings.json 只存 provider/model（和 custom 的地址）。
+MODEL_PRESETS = {
+    "dashscope": {
+        "label": "阿里云百炼 · 通义千问",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "default_model": "qwen3.5-omni-plus-2026-03-15",
+        "hint": "在阿里云百炼（bailian.console.aliyun.com）获取 API Key",
+    },
+    "zhipu": {
+        "label": "智谱开放平台 · GLM",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "default_model": "glm-5.3-flash",
+        "hint": "在智谱开放平台（open.bigmodel.cn）获取 API Key",
+    },
+    "openai": {
+        "label": "OpenAI · GPT",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-5-mini",
+        "hint": "在 OpenAI 平台（platform.openai.com）获取 API Key",
+    },
+    "moonshot": {
+        "label": "月之暗面 · Kimi",
+        "base_url": "https://api.moonshot.cn/v1",
+        "default_model": "kimi-k3",
+        "hint": "在 Moonshot 开放平台（platform.kimi.com）获取 API Key",
+    },
+    "siliconflow": {
+        "label": "硅基流动 · SiliconFlow",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "default_model": "Qwen/Qwen3-VL-32B",
+        "hint": "在硅基流动（cloud.siliconflow.cn）获取 API Key",
+    },
+    "doubao": {
+        "label": "火山方舟 · 豆包",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "default_model": "doubao-seed-1-6-vision-250815",
+        "hint": "在火山方舟控制台（console.volcengine.com/ark）获取 API Key；模型填官方模型名或推理接入点 ID",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+        "default_model": "deepseek-v4-flash-vision-exp",
+        "hint": "在 DeepSeek 开放平台（platform.deepseek.com）获取 API Key",
+    },
+    "custom": {
+        "label": "自定义（OpenAI 兼容）",
+        "base_url": "",
+        "default_model": "",
+        "hint": "填写任意 OpenAI 兼容端点的接口地址、模型名称与 Key",
+    },
+}
+
+# 每供应商一份模型服务配置（settings.json 的 model_services：{pid: {model, base_url?}}），
+# Key 按供应商存 .env 的 MODEL_KEY_<PID>。当前生效供应商 = model_provider
+MODEL_SERVICES = SETTINGS.get("model_services")
+if not isinstance(MODEL_SERVICES, dict):
+    MODEL_SERVICES = {}
+
+
+def model_key_for(provider: str) -> str:
+    """某供应商已保存的 API Key：.env 的 MODEL_KEY_<PROVIDER>，旧键按归属回退。
+
+    旧键只认归属供应商：ANALYZE_API_KEY / 旧统一键 MODEL_API_KEY 属千问，
+    DEEPSEEK_API_KEY 属 DeepSeek；其余供应商没配过就是空，不串用别家的 Key。
+    """
+    legacy = {
+        "dashscope": os.getenv("ANALYZE_API_KEY", "") or os.getenv("MODEL_API_KEY", ""),
+        "deepseek": os.getenv("DEEPSEEK_API_KEY", ""),
+    }
+    return (
+        os.getenv(f"MODEL_KEY_{provider.upper()}", "") or legacy.get(provider, "")
+    ).strip()
+
+
+def _apply_model_service() -> None:
+    """把当前供应商的配置解析进模块级变量（导入时与设置页保存后各执行一次）。
+
+    截图分析与日报生成共用当前供应商这一个多模态模型，经 ANALYZE_* / DEEPSEEK_*
+    别名兼容既有调用点（含任务计划的独立进程：进程启动 import 时即解析）。
+    """
+    global MODEL_PROVIDER, MODEL_BASE_URL, MODEL_NAME, MODEL_API_KEY
+    global ANALYZE_API_KEY, ANALYZE_BASE_URL, ANALYZE_MODEL
+    global DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, SUMMARY_MODEL
+    if MODEL_PROVIDER not in MODEL_PRESETS:
+        MODEL_PROVIDER = "dashscope"
+    preset = MODEL_PRESETS[MODEL_PROVIDER]
+    svc = MODEL_SERVICES.get(MODEL_PROVIDER)
+    if not isinstance(svc, dict):
+        svc = {}
+    # 仅 custom 供应商信任 settings.json 里的地址，预设供应商始终用代码里的官方端点
+    MODEL_BASE_URL = (
+        str(svc.get("base_url", "")).strip() if MODEL_PROVIDER == "custom" else ""
+    ) or preset["base_url"]
+    MODEL_NAME = str(svc.get("model", "")).strip() or preset["default_model"]
+    MODEL_API_KEY = model_key_for(MODEL_PROVIDER)
+
+    ANALYZE_API_KEY = MODEL_API_KEY
+    ANALYZE_BASE_URL = MODEL_BASE_URL
+    ANALYZE_MODEL = MODEL_NAME
+
+    DEEPSEEK_API_KEY = MODEL_API_KEY
+    DEEPSEEK_BASE_URL = MODEL_BASE_URL
+    SUMMARY_MODEL = MODEL_NAME
+
+
+MODEL_PROVIDER = str(SETTINGS.get("model_provider", "")).strip() or "dashscope"
+_apply_model_service()
+
+# 截图分析采样参数（固定常量，与供应商无关；analyze.py 调用点）
 ANALYZE_TEMPERATURE = 1
 ANALYZE_TOP_P = 0.95
 ANALYZE_MAX_TOKENS = 4096
-
-# 日报/周报总结 API（DeepSeek 官方）
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-SUMMARY_MODEL = "deepseek-v4-flash"
 
 # 截屏调度
 MONITOR_INDEX = 1                # mss 监控器编号，1 = 主屏

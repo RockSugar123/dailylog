@@ -942,16 +942,13 @@ function statusHtml(cfg) {
   const next = cfg.recording_enabled
     ? (cfg.test_interval_seconds ? `测试每 ${cfg.test_interval_seconds}s` : (cfg.next_capture || "—"))
     : "已停用";
-  const keyDesc = cfg.has_analyze_key && cfg.has_summary_key
-    ? `均已配置（${escapeHtml(cfg.analyze_key_hint || "")} / ${escapeHtml(cfg.summary_key_hint || "")}）`
-    : (cfg.has_analyze_key ? "分析已配，总结未配" : (cfg.has_summary_key ? "分析未配，总结已配" : "均未配置"));
+  const keyDesc = cfg.has_key ? `已配置（${escapeHtml(cfg.key_hint || "")}）` : "未配置";
   return `
     <dt>定时记录</dt><dd class="${cfg.recording_enabled ? "ok" : "bad"}">${cfg.recording_enabled ? "运行中" : "已停用"}</dd>
     <dt>下次截屏</dt><dd>${next}</dd>
     <dt>空闲暂停</dt><dd>${cfg.idle_enabled ? `静止 ${cfg.idle_minutes} 分钟暂停` : "关闭"}</dd>
-    <dt>分析模型</dt><dd>${escapeHtml(cfg.analyze_model || "未配置")}</dd>
-    <dt>总结模型</dt><dd>${escapeHtml(cfg.summary_model || "未配置")}</dd>
-    <dt>API Key</dt><dd>${keyDesc}</dd>`;
+    <dt>模型服务</dt><dd>${escapeHtml(cfg.provider_label || "")} · ${escapeHtml(cfg.model || "未配置")}</dd>
+    <dt>API Key</dt><dd class="${cfg.has_key ? "ok" : "bad"}">${keyDesc}</dd>`;
 }
 
 function updateStatus(cfg) {
@@ -1003,9 +1000,7 @@ async function loadSettings() {
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
   usageEnabled = cfg.usage_enabled !== false;
   document.getElementById("usage-enabled").checked = usageEnabled;
-  await fillKeyInputs();  // 输入框常驻真实 Key（password 态显示星号）
-  refreshKeyStatus("analyze", cfg);
-  refreshKeyStatus("summary", cfg);
+  await fillModelService(cfg);  // 回填供应商下拉与模型服务配置（Key 以星号态常驻输入框）
   updateStatus(cfg);
   loadDbStats();
 }
@@ -1110,70 +1105,91 @@ document.getElementById("set-name").addEventListener("change", (e) => {
   autoSave(apiCall("set_report_name", e.target.value.trim()), "汇报人");
 });
 
-/* ===================== 设置页 · API Key 配置 ===================== */
+/* ===================== 设置页 · 模型服务（预设供应商 + 模型名称 + Key） ===================== */
 
-const KEY_GETTERS = {
-  analyze: "在阿里云百炼（platform.aliyuncs.com）获取",
-  summary: "在 DeepSeek 开放平台（platform.deepseek.com）获取",
-};
-const KEY_ELEMS = {
-  analyze: { input: "key-analyze", eye: "key-analyze-eye", test: "key-analyze-test", status: "key-analyze-status" },
-  summary: { input: "key-summary", eye: "key-summary-eye", test: "key-summary-test", status: "key-summary-status" },
-};
+let modelPresets = [];   // 后端下发：{id,label,base_url,default_model,hint}
+let serviceCache = {};   // pid → {model,base_url,key}，切换供应商时据此联动回显
+let currentProvider = "";
 
-function setKeyStatus(ch, text, cls) {
-  const el = document.getElementById(KEY_ELEMS[ch].status);
+function presetById(id) { return modelPresets.find((p) => p.id === id); }
+
+function setModelStatus(text, cls) {
+  const el = document.getElementById("key-model-status");
   el.textContent = text;
   el.classList.remove("key-result-ok", "key-result-bad");
   if (cls) el.classList.add(cls);
 }
 
-// 状态行：已配置显示掩码 + 测试引导，未配置显示获取渠道
-function refreshKeyStatus(ch, cfg) {
-  const has = ch === "analyze" ? cfg.has_analyze_key : cfg.has_summary_key;
-  const hint = ch === "analyze" ? cfg.analyze_key_hint : cfg.summary_key_hint;
-  if (has) setKeyStatus(ch, `已配置 ${hint}，可点"测试连接"验证`, "key-result-ok");
-  else setKeyStatus(ch, KEY_GETTERS[ch]);
+// 切供应商：模型名称/接口地址/Key 联动换成该供应商已保存的（没保存过则为空白），
+// 模型名占位提示展示该供应商默认值，自定义供应商显隐接口地址行
+function applyProviderUI(id) {
+  const p = presetById(id) || {};
+  const svc = serviceCache[id] || {};
+  currentProvider = id;
+  document.getElementById("model-name-input").value = svc.model || "";
+  document.getElementById("base-url-input").value = svc.base_url || "";
+  document.getElementById("key-model").value = svc.key || "";
+  document.getElementById("model-name-input").placeholder =
+    p.default_model ? `留空用默认 ${p.default_model}` : "填写模型名称";
+  document.getElementById("base-url-row").hidden = id !== "custom";
+  if (svc.key) setModelStatus(`已配置 ${maskKey(svc.key)}，可点"测试连接"验证`, "key-result-ok");
+  else setModelStatus(p.hint || "");
 }
 
-// 设置页加载时回填真实 Key 到输入框（password 态显示星号，点眼睛可见）
-async function fillKeyInputs() {
-  const r = await apiCall("get_api_keys");
+function maskKey(key) {
+  if (!key) return "";
+  return key.length <= 8 ? "****" : `${key.slice(0, 3)}****${key.slice(-4)}`;
+}
+
+// 设置页加载：供应商下拉 + 各供应商配置缓存 + 回显当前供应商
+async function fillModelService(cfg) {
+  modelPresets = cfg.model_presets || [];
+  const r = await apiCall("get_model_service");
   if (r && r.ok) {
-    document.getElementById("key-analyze").value = r.analyze_key || "";
-    document.getElementById("key-summary").value = r.summary_key || "";
+    serviceCache = r.services || {};
+    currentProvider = r.provider || cfg.provider || modelPresets[0]?.id || "dashscope";
+  } else {
+    currentProvider = cfg.provider || modelPresets[0]?.id || "dashscope";
   }
+  setupSelect("provider-pop", "provider-btn", modelPresets.map((p) => p.id),
+    (id) => (presetById(id) || {}).label || id,
+    (id) => { applyProviderUI(id); }, currentProvider);
+  applyProviderUI(currentProvider);
 }
 
-for (const ch of Object.keys(KEY_ELEMS)) {
-  const { input, eye, test } = KEY_ELEMS[ch];
-  document.getElementById(eye).addEventListener("click", () => {
-    const inp = document.getElementById(input);
-    const btn = document.getElementById(eye);
-    if (inp.type === "password") { inp.type = "text"; btn.textContent = "👁"; }  // 睁眼：明文
-    else { inp.type = "password"; btn.textContent = "🙈"; }  // 闭眼：星号遮蔽
-  });
-  document.getElementById(test).addEventListener("click", async () => {
-    const btn = document.getElementById(test);
-    btn.disabled = true;
-    setKeyStatus(ch, "测试中，请稍候…");
-    const r = await apiCall("test_api_connection", ch);
-    btn.disabled = false;
-    if (r && r.ok) setKeyStatus(ch, `✓ 连接成功 · ${(r.latency_ms / 1000).toFixed(1)} 秒`, "key-result-ok");
-    else setKeyStatus(ch, `✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
-  });
-}
-// 保存按钮任何情况可点：输入框常驻真实 Key（星号态），首次输入/修改/未改动统一"保存成功"；
-// set_key 幂等，未改动时重写无副作用。仅任一为空时拦截并提示
-document.getElementById("key-save").addEventListener("click", async () => {
-  const a = document.getElementById("key-analyze").value.trim();
-  const s = document.getElementById("key-summary").value.trim();
-  if (!a || !s) { toast("请先输入 Key 才能使用该应用", 5000); return; }
-  const r = await apiCall("save_api_keys", a, s);
+document.getElementById("key-model-eye").addEventListener("click", () => {
+  const inp = document.getElementById("key-model");
+  const btn = document.getElementById("key-model-eye");
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "👁"; }  // 睁眼：明文
+  else { inp.type = "password"; btn.textContent = "🙈"; }  // 闭眼：星号遮蔽
+});
+
+// 测的是表单草稿（供应商/模型/Key），Key 留空时后端回退用已保存的
+document.getElementById("key-model-test").addEventListener("click", async () => {
+  const btn = document.getElementById("key-model-test");
+  btn.disabled = true;
+  setModelStatus("测试中，请稍候…");
+  const r = await apiCall("test_model_connection", currentProvider,
+    document.getElementById("model-name-input").value.trim(),
+    document.getElementById("key-model").value.trim(),
+    document.getElementById("base-url-input").value.trim());
+  btn.disabled = false;
+  if (r && r.ok) setModelStatus(`✓ 连接成功 · ${(r.latency_ms / 1000).toFixed(1)} 秒`, "key-result-ok");
+  else setModelStatus(`✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
+});
+
+// 保存：写入当前供应商的模型名与 Key（Key 留空表示不修改），并切换为生效供应商
+document.getElementById("model-save").addEventListener("click", async () => {
+  const r = await apiCall("save_model_service", currentProvider,
+    document.getElementById("model-name-input").value.trim(),
+    document.getElementById("key-model").value.trim(),
+    document.getElementById("base-url-input").value.trim());
   if (r && r.ok) {
-    refreshKeyStatus("analyze", r);
-    refreshKeyStatus("summary", r);
-    toast("保存成功");
+    if (r.has_key) setModelStatus(`已配置 ${r.key_hint}，可点"测试连接"验证`, "key-result-ok");
+    else setModelStatus("已保存供应商与模型，但尚未配置 API Key", "key-result-bad");
+    toast(`已保存并生效：${r.provider_label || ""} · ${r.model || ""}`);
+    const fresh = await apiCall("get_model_service");  // 刷新各供应商缓存
+    if (fresh && fresh.ok) serviceCache = fresh.services || serviceCache;
     const cfg = await apiCall("get_config");  // 同步"当前状态"面板
     if (cfg) updateStatus(cfg);
   } else {
