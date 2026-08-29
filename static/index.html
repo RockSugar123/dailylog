@@ -258,6 +258,40 @@
         <div class="page-desc">配置截屏记录、模型通道与数据管理</div>
 
         <div class="panel">
+          <div class="panel-head">模型服务<span class="hint">选供应商，填模型名称与 Key，保存即生效，无需重启</span></div>
+          <div class="settings-row">
+            <label for="provider-btn">模型供应商</label>
+            <div class="select-wrap" id="provider-wrap">
+              <button class="select-btn" id="provider-btn">加载中<span class="caret">▾</span></button>
+              <div class="select-pop" id="provider-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row" id="base-url-row" hidden>
+            <label for="base-url-input">接口地址</label>
+            <input type="text" id="base-url-input" class="key-input" placeholder="https://…/v1（OpenAI 兼容端点）" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label for="model-name-input">模型名称</label>
+            <input type="text" id="model-name-input" class="key-input" placeholder="如 qwen-vl-plus" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label for="key-model">API Key</label>
+            <input type="password" id="key-model" class="key-input" placeholder="粘贴 API Key" autocomplete="off" />
+            <button class="btn-ghost key-eye" id="key-model-eye" title="显示/隐藏">🙈</button>
+            <button class="btn-primary" id="key-model-test">测试连接</button>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="hint" id="key-model-status">正在加载模型服务配置…</span>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="set-spacer"></span>
+            <button class="btn-primary" id="model-save">保存</button>
+          </div>
+        </div>
+
+        <div class="panel">
           <div class="panel-head">截图与记录</div>
           <div class="settings-row">
             <label for="theme-btn">界面皮肤</label>

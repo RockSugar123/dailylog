@@ -225,7 +225,7 @@ def main(force: bool = False) -> int:
     """截屏记录主流程；force=True 时跳过空闲检测与画面去重（手动截屏）。"""
     cleanup_expired()  # 顺带按保留天数清理过期数据（每天一次）
     if not config.ANALYZE_API_KEY:
-        log("未配置 ANALYZE_API_KEY，请在 .env 中填写后重试")
+        log("未配置模型服务 API Key，请在应用设置页或 .env 中填写后重试")
         return 1
 
     if not force and config.IDLE_ENABLED and last_input_idle_seconds() > config.IDLE_MINUTES * 60:

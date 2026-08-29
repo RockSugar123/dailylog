@@ -225,7 +225,7 @@ def generate_report(day: str = None, week: str = None) -> tuple:
     供 CLI 与桌面应用共用。返回 (输出文件路径, 报告内容)；无记录或未配置 key 时抛 ValueError。
     """
     if not config.DEEPSEEK_API_KEY:
-        raise ValueError("未配置 DEEPSEEK_API_KEY，请在 .env 中填写（platform.deepseek.com 获取）")
+        raise ValueError("未配置模型服务 API Key，请在应用设置页或 .env 中填写")
 
     today = datetime.now()
     if week:

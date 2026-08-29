@@ -60,7 +60,7 @@ One more thing: whenever you download any project, **always review the code for 
 | System tray | pystray + pywin32 |
 | Screen capture | mss + Pillow |
 | Idle detection | pywin32 (GetLastInputInfo) + pynput |
-| LLM calls | requests → NVIDIA NIM (vision model analyzes screenshots) + DeepSeek (generates daily/weekly reports) |
+| LLM calls | requests → DashScope (vision model analyzes screenshots) + DeepSeek (generates daily/weekly reports) |
 | Scheduling | Windows Task Scheduler (schtasks) |
 | Configuration | python-dotenv (`.env`) + settings.json |
 | Packaging | PyInstaller (onedir mode) |
@@ -71,8 +71,8 @@ One more thing: whenever you download any project, **always review the code for 
 
 - Windows 10/11 (Task Scheduler + mss capture + GetLastInputInfo are all Windows capabilities)
 - Python 3.10+ (dev-verified on 3.13)
-- Two API keys:
-  - **NVIDIA NIM** (screenshot analysis, vision model, default `minimaxai/minimax-m3`): <https://build.nvidia.com>
+- Two API keys (paste them in the app's Settings page on first use, see below):
+  - **Alibaba Cloud DashScope** (screenshot analysis, vision model): <https://platform.aliyuncs.com>
   - **DeepSeek** (daily/weekly report generation): <https://platform.deepseek.com>
 
 ### 1. Install dependencies
@@ -81,12 +81,14 @@ One more thing: whenever you download any project, **always review the code for 
 pip install -r requirements.txt
 ```
 
-### 2. Configure API keys
+### 2. Configure API keys (recommended: paste in the Settings page)
 
-Fill in the keys following [.env.example](.env.example) (place it in the project's `data\` directory during development; the packaged build reads `dailylog-app\data\.env` next to the deployed exe):
+Open the app → **Settings → Model Service**, paste both keys → **Save** → click **Test Connection**. Saved keys take effect immediately (scheduled tasks included), no restart needed.
+
+Alternatively, edit `.env` manually following [.env.example](.env.example) (place it in the project's `data\` directory during development; the packaged build reads `dailylog-app\data\.env` next to the deployed exe):
 
 ```
-ANALYZE_API_KEY=your-NVIDIA-key
+ANALYZE_API_KEY=your-DashScope-key
 DEEPSEEK_API_KEY=sk-your-DeepSeek-key
 ```
 
@@ -195,7 +197,7 @@ One JSON object per line:
 
 ## 💰 Cost Estimate (with dedup)
 
-8h of work ≈ 48 samples, 15–25 valid entries after dedup. Cost depends strongly on the chosen model: the default `minimaxai/minimax-m3` (NVIDIA NIM, free tier for personal accounts) — measure against your chosen model's input/output pricing.
+8h of work ≈ 48 samples, 15–25 valid entries after dedup. Cost depends strongly on the chosen model: the configured vision model on DashScope (see `core/config.py`) — measure against your chosen model's input/output pricing.
 
 ## 📦 Project Layout
 

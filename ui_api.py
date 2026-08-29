@@ -3,6 +3,7 @@
 纯 Python，不依赖 pywebview，便于无 GUI 直测。返回结构均为 JSON 友好的 dict/list。
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,7 +11,9 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 
-from core import analyze, config, summarize, todos, usage
+from dotenv import set_key
+
+from core import analyze, config, llm, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
@@ -213,6 +216,15 @@ def persist_recording_choice(enabled: bool) -> None:
     _write_settings(recording_enabled=bool(enabled))
 
 
+def _key_hint(key: str) -> str:
+    """Key 的掩码提示（设置页展示用），如 sk-****abc4；绝不返回完整 Key。"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
+
+
 class Api:
     """暴露给前端的方法。pywebview 桥会自动把返回值 JSON 序列化给 JS。"""
 
@@ -338,8 +350,6 @@ class Api:
             "interval_minutes": config.SETTINGS.get("interval_minutes", 10),
             "interval_choices": list(INTERVAL_CHOICES),
             "report_name": config.REPORT_NAME,
-            "analyze_model": config.ANALYZE_MODEL,
-            "summary_model": config.SUMMARY_MODEL,
             "recording_enabled": task_is_enabled(),
             "next_capture": task_next_run(),
             "idle_enabled": bool(config.SETTINGS.get("idle_enabled", True)),
@@ -354,8 +364,17 @@ class Api:
             "usage_enabled": bool(config.SETTINGS.get("usage_enabled", True)),
             "theme": config.SETTINGS.get("theme", "glass"),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
-            "has_analyze_key": bool(config.ANALYZE_API_KEY),
-            "has_summary_key": bool(config.DEEPSEEK_API_KEY),
+            "model_presets": [
+                {"id": pid, "label": p["label"], "base_url": p["base_url"],
+                 "default_model": p["default_model"], "hint": p["hint"]}
+                for pid, p in config.MODEL_PRESETS.items()
+            ],
+            "provider": config.MODEL_PROVIDER,
+            "provider_label": config.MODEL_PRESETS[config.MODEL_PROVIDER]["label"],
+            "base_url": config.MODEL_BASE_URL,
+            "model": config.MODEL_NAME,
+            "has_key": bool(config.MODEL_API_KEY),
+            "key_hint": _key_hint(config.MODEL_API_KEY),
         }
 
     def get_logs(self, limit: int = 300) -> dict:
@@ -385,6 +404,124 @@ class Api:
             return {"ok": True, "test_interval_seconds": int(seconds)}
         except (ValueError, RuntimeError) as e:
             return {"ok": False, "error": str(e)}
+
+    def get_model_service(self) -> dict:
+        """设置页加载时回显全部供应商的模型服务配置（含各自 Key）。
+
+        前端缓存后切换供应商下拉时即时联动回显。纯本地应用：Key 本就明文存于
+        用户磁盘的 .env，回显到用户自己的界面没有额外暴露面。刻意不放进
+        轮询的 get_config，避免反复传输。
+        """
+        services = {}
+        for pid, preset in config.MODEL_PRESETS.items():
+            svc = config.MODEL_SERVICES.get(pid)
+            if not isinstance(svc, dict):
+                svc = {}
+            services[pid] = {
+                # 只回显用户填过的模型名（未填为空白，占位提示里展示默认值）
+                "model": str(svc.get("model", "")).strip(),
+                "base_url": str(svc.get("base_url", "")).strip() if pid == "custom" else preset["base_url"],
+                "key": config.model_key_for(pid),
+            }
+        return {"ok": True, "provider": config.MODEL_PROVIDER, "services": services}
+
+    def save_model_service(self, provider: str, model: str, key: str = "",
+                           base_url: str = "") -> dict:
+        """保存某供应商的模型服务：模型名写 settings.json 的 model_services，Key 写 .env。
+
+        各供应商的模型名/Key 相互独立（.env 键为 MODEL_KEY_<PROVIDER>）。
+        key 传空表示不修改该供应商的 Key。预设供应商的 base_url 以代码里的
+        官方端点为准；custom 用前端传的地址。保存即切换生效并同步本进程 config。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip()
+        preset = config.MODEL_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知供应商: {provider}"}
+        model = (model or "").strip() or preset["default_model"]
+        if not model:
+            return {"ok": False, "error": "请填写模型名称"}
+        if provider == "custom":
+            base_url = (base_url or "").strip().rstrip("/")
+            if not base_url.startswith(("http://", "https://")):
+                return {"ok": False, "error": "自定义供应商需填写以 http(s):// 开头的接口地址"}
+        key = (key or "").strip()
+        if key:
+            env_name = f"MODEL_KEY_{provider.upper()}"
+            try:
+                set_key(str(config.DATA_DIR / ".env"), env_name, key)
+            except OSError as e:
+                _logger.error("写入 .env 失败: %s", e)
+                return {"ok": False, "error": f"写入 .env 失败：{e}"}
+            os.environ[env_name] = key  # .env 只在启动时加载，同步进程环境供 model_key_for 读取
+        # 更新该供应商的配置（其余供应商不动）；顺带清理旧版统一键
+        services = {k: dict(v) for k, v in config.MODEL_SERVICES.items() if isinstance(v, dict)}
+        svc = services.setdefault(provider, {})
+        svc["model"] = model
+        if provider == "custom":
+            svc["base_url"] = base_url
+        else:
+            svc.pop("base_url", None)
+        data = dict(config.SETTINGS)
+        data["model_provider"] = provider
+        data["model_services"] = services
+        legacy_gone = data.pop("model_name", None) is not None or data.pop("model_base_url", None) is not None
+        config.SETTINGS.pop("model_name", None)   # config.SETTINGS 是 _write_settings 的
+        config.SETTINGS.pop("model_base_url", None)  # 合并源，需同步移除才能真正落盘删除
+        _write_settings(**data)
+        config.MODEL_SERVICES.clear()
+        config.MODEL_SERVICES.update(services)
+        config.MODEL_PROVIDER = provider
+        config._apply_model_service()
+        # 只记供应商与模型名，不记 Key
+        _logger.info("模型服务已更新：%s / %s%s", provider, model,
+                     "（清理旧版配置）" if legacy_gone else "")
+        return {
+            "ok": True,
+            "provider": provider,
+            "provider_label": preset["label"],
+            "base_url": config.MODEL_BASE_URL,
+            "model": config.MODEL_NAME,
+            "has_key": bool(config.MODEL_API_KEY),
+            "key_hint": _key_hint(config.MODEL_API_KEY),
+        }
+
+    def test_model_connection(self, provider: str = "", model: str = "",
+                              key: str = "", base_url: str = "") -> dict:
+        """设置页"测试连接"：对表单当前草稿（供应商/模型/Key）发一条极短消息验证连通性。
+
+        Key/模型留空时回退到该供应商已保存值（再回退预设默认模型），
+        方便只改了供应商就想先测的场景。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip() or config.MODEL_PROVIDER
+        preset = config.MODEL_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知供应商: {provider}"}
+        if not model or not str(model).strip():
+            svc = config.MODEL_SERVICES.get(provider)
+            model = (str(svc.get("model", "")).strip()
+                     if isinstance(svc, dict) else "") or preset["default_model"]
+        model = str(model).strip()
+        if not model:
+            return {"ok": False, "error": "请先填写模型名称"}
+        if provider == "custom":
+            base_url = (base_url or "").strip().rstrip("/")
+            if not base_url.startswith(("http://", "https://")):
+                return {"ok": False, "error": "自定义供应商需先填写接口地址"}
+        else:
+            base_url = preset["base_url"]
+        key = (key or "").strip() or config.model_key_for(provider)
+        if not key:
+            return {"ok": False, "error": "尚未配置 API Key，请先填写并保存"}
+        result = llm.test_chat(base_url, key, model)
+        if result.get("ok"):
+            _logger.info("模型服务测试通过：%s / %s（%d ms）",
+                         provider, model, result.get("latency_ms", 0))
+        else:
+            _logger.warning("模型服务测试失败（%s / %s）：%s",
+                            provider, model, result.get("error", ""))
+        return result
 
     def clear_test_interval(self) -> dict:
         """清除测试间隔（恢复任务计划驱动的分钟级记录）。"""
@@ -467,6 +604,7 @@ class Api:
         "interval_minutes", "report_name", "idle_enabled", "idle_minutes",
         "retention_days", "recording_enabled", "dedup_enabled",
         "enter_capture_enabled", "enter_capture_interval", "usage_enabled", "theme",
+        "model_provider", "model_services",
     )
 
     def export_data(self, path: str) -> dict:

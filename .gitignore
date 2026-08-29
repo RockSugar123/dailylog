@@ -4,8 +4,16 @@
 # 运行时数据（个人工作记录、密钥、日志，全部在 data/ 下）
 data/
 
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.idea/
+
 # 打包中间产物（部署目录在项目外：%~dp0..\dailylog-app）
 build/
+dist_build/
 
 # Python
 __pycache__/
@@ -14,3 +22,6 @@ __pycache__/
 
 # 本地工具缓存
 .playwright-cli/
+
+# app.py 每次启动生成的缓存穿透页面（由 index.html 派生，勿编辑勿提交）
+static/index_cachebust.html
