@@ -609,6 +609,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 }
 .settings-row input[type="password"]:focus { outline: 2px solid var(--brand); outline-offset: 1px }
 .key-eye { min-width: 40px; height: 36px; padding: 0; font-size: 14px }
+/* 宽度绑定在元素上而非 type：切 text/password 时命中规则不同会导致框变短 */
+.settings-row input.key-input { width: 260px }
 .key-result-ok { color: #4ade80 }
 .key-result-bad { color: #f87171 }
 .set-spacer { flex: 1 }

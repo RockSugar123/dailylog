@@ -1149,7 +1149,9 @@ for (const ch of Object.keys(KEY_ELEMS)) {
   const { input, eye, test } = KEY_ELEMS[ch];
   document.getElementById(eye).addEventListener("click", () => {
     const inp = document.getElementById(input);
-    inp.type = inp.type === "password" ? "text" : "password";
+    const btn = document.getElementById(eye);
+    if (inp.type === "password") { inp.type = "text"; btn.textContent = "👁"; }  // 睁眼：明文
+    else { inp.type = "password"; btn.textContent = "🙈"; }  // 闭眼：星号遮蔽
   });
   document.getElementById(test).addEventListener("click", async () => {
     const btn = document.getElementById(test);
