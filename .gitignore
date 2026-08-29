@@ -28,3 +28,7 @@ static/index_cachebust.html
 
 # 自动备份包（用户选择把备份目录指到仓库内时，不进版本库）
 dailylog-backup-*.zip
+
+# 本地协作/密钥文件，不进仓库
+AGENTS.md
+.env
