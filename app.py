@@ -54,6 +54,24 @@ def resource_path(rel: str) -> Path:
     return base / rel
 
 
+def _cachebust_html() -> Path:
+    """生成带资产版本号的 index.html 派生文件（static/index_cachebust.html）。
+
+    WebView2 数据目录持久化（private_mode=False），会缓存旧 style.css/script.js，
+    改完前端重启应用仍显示旧界面。这里按资产文件 mtime 给引用追加 ?v= 参数：
+    文件一变 URL 即变，缓存自动失效，无需手动清缓存或改版本号。
+    必须与资产同目录（pywebview 以 html 所在目录为服务根），否则相对引用失效。
+    """
+    src = resource_path("static/index.html")
+    html = src.read_text(encoding="utf-8")
+    for attr, asset in (("href=", "style.css"), ("src=", "script.js")):
+        mtime = int((resource_path(f"static/{asset}")).stat().st_mtime)
+        html = html.replace(f'{attr}"{asset}"', f'{attr}"{asset}?v={mtime}"')
+    out = resource_path("static/index_cachebust.html")
+    out.write_text(html, encoding="utf-8")
+    return out
+
+
 class AppApi(ui_api.Api):
     """在 ui_api 基础上补充无边框窗口的控制方法（供前端标题栏按钮调用）。"""
 
@@ -169,9 +187,14 @@ def main() -> None:
 
     def _create_window(hidden: bool):
         """创建主窗口（首次启动与零窗口重开共用同一套事件绑定）。"""
+        try:
+            page = str(_cachebust_html())
+        except Exception as e:  # noqa: BLE001 生成失败不阻塞启动，退回原始文件（可能吃缓存）
+            _logger.error("生成缓存穿透页面失败，退回原始 index.html: %s", e)
+            page = str(resource_path("static/index.html"))
         win = webview.create_window(
             config.APP_TITLE,
-            str(resource_path("static/index.html")),
+            page,
             width=1280, height=800, min_size=(960, 600),
             frameless=True,
             background_color="#060a09",

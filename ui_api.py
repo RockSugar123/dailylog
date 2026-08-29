@@ -10,7 +10,9 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 
-from core import analyze, config, summarize, todos, usage
+from dotenv import set_key
+
+from core import analyze, config, llm, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
@@ -213,6 +215,15 @@ def persist_recording_choice(enabled: bool) -> None:
     _write_settings(recording_enabled=bool(enabled))
 
 
+def _key_hint(key: str) -> str:
+    """Key 的掩码提示（设置页展示用），如 sk-****abc4；绝不返回完整 Key。"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
+
+
 class Api:
     """暴露给前端的方法。pywebview 桥会自动把返回值 JSON 序列化给 JS。"""
 
@@ -356,6 +367,8 @@ class Api:
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
             "has_analyze_key": bool(config.ANALYZE_API_KEY),
             "has_summary_key": bool(config.DEEPSEEK_API_KEY),
+            "analyze_key_hint": _key_hint(config.ANALYZE_API_KEY),
+            "summary_key_hint": _key_hint(config.DEEPSEEK_API_KEY),
         }
 
     def get_logs(self, limit: int = 300) -> dict:
@@ -385,6 +398,81 @@ class Api:
             return {"ok": True, "test_interval_seconds": int(seconds)}
         except (ValueError, RuntimeError) as e:
             return {"ok": False, "error": str(e)}
+
+    def get_api_keys(self) -> dict:
+        """设置页加载时回显完整 Key（输入框默认星号态，点眼睛才可见）。
+
+        纯本地应用：Key 本就明文存于用户磁盘的 .env，回显到用户自己的界面
+        没有额外暴露面。刻意不放进每分钟轮询的 get_config，避免反复传输。
+        """
+        return {
+            "ok": True,
+            "analyze_key": config.ANALYZE_API_KEY,
+            "summary_key": config.DEEPSEEK_API_KEY,
+        }
+
+    def save_api_keys(self, analyze_key: str = "", summary_key: str = "") -> dict:
+        """设置页粘贴 API Key：写入 data/.env（保留其余行）并同步本进程 config。
+
+        传空字符串表示不修改该 Key（用户可能只想更新其中一个）。
+        不返回完整 Key，前端只拿掩码提示。定时任务每次启动重新 load_dotenv，
+        所以下次截屏/生成报告自动用新 Key，无需重建任务计划。
+        """
+        _logger = config.setup_logging()
+        env_path = config.DATA_DIR / ".env"
+        changed = []
+        analyze_key = (analyze_key or "").strip()
+        summary_key = (summary_key or "").strip()
+        try:
+            if analyze_key:
+                set_key(str(env_path), "ANALYZE_API_KEY", analyze_key)
+                config.ANALYZE_API_KEY = analyze_key
+                changed.append("截图分析")
+            if summary_key:
+                set_key(str(env_path), "DEEPSEEK_API_KEY", summary_key)
+                config.DEEPSEEK_API_KEY = summary_key
+                changed.append("日报总结")
+        except OSError as e:
+            _logger.error("写入 .env 失败: %s", e)
+            return {"ok": False, "error": f"写入 .env 失败：{e}"}
+        if changed:
+            # 只记 Key 名不记值，避免密钥进日志
+            _logger.info("API Key 已更新（%s）", "、".join(changed))
+        return {
+            "ok": True,
+            "has_analyze_key": bool(config.ANALYZE_API_KEY),
+            "has_summary_key": bool(config.DEEPSEEK_API_KEY),
+            "analyze_key_hint": _key_hint(config.ANALYZE_API_KEY),
+            "summary_key_hint": _key_hint(config.DEEPSEEK_API_KEY),
+        }
+
+    def test_api_connection(self, channel: str) -> dict:
+        """设置页"测试连接"：对已保存的 Key 发一条极短消息验证连通性。
+
+        channel = "analyze"（截图分析 / DashScope）或 "summary"（日报总结 / DeepSeek）。
+        测的是已保存的 Key（而非输入框草稿），状态不歧义。
+        """
+        if channel == "analyze":
+            key, base_url, model, label = (
+                config.ANALYZE_API_KEY, config.ANALYZE_BASE_URL,
+                config.ANALYZE_MODEL, "截图分析",
+            )
+        elif channel == "summary":
+            key, base_url, model, label = (
+                config.DEEPSEEK_API_KEY, config.DEEPSEEK_BASE_URL,
+                config.SUMMARY_MODEL, "日报总结",
+            )
+        else:
+            return {"ok": False, "error": f"未知通道: {channel}"}
+        if not key:
+            return {"ok": False, "error": f"尚未配置 {label} Key，请先填写并保存"}
+        result = llm.test_chat(base_url, key, model)
+        _logger = config.setup_logging()
+        if result.get("ok"):
+            _logger.info("%s通道测试通过（%d ms）", label, result.get("latency_ms", 0))
+        else:
+            _logger.warning("%s通道测试失败：%s", label, result.get("error", ""))
+        return result
 
     def clear_test_interval(self) -> dict:
         """清除测试间隔（恢复任务计划驱动的分钟级记录）。"""

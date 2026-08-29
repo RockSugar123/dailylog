@@ -942,13 +942,16 @@ function statusHtml(cfg) {
   const next = cfg.recording_enabled
     ? (cfg.test_interval_seconds ? `测试每 ${cfg.test_interval_seconds}s` : (cfg.next_capture || "—"))
     : "已停用";
+  const keyDesc = cfg.has_analyze_key && cfg.has_summary_key
+    ? `均已配置（${escapeHtml(cfg.analyze_key_hint || "")} / ${escapeHtml(cfg.summary_key_hint || "")}）`
+    : (cfg.has_analyze_key ? "分析已配，总结未配" : (cfg.has_summary_key ? "分析未配，总结已配" : "均未配置"));
   return `
     <dt>定时记录</dt><dd class="${cfg.recording_enabled ? "ok" : "bad"}">${cfg.recording_enabled ? "运行中" : "已停用"}</dd>
     <dt>下次截屏</dt><dd>${next}</dd>
     <dt>空闲暂停</dt><dd>${cfg.idle_enabled ? `静止 ${cfg.idle_minutes} 分钟暂停` : "关闭"}</dd>
     <dt>分析模型</dt><dd>${escapeHtml(cfg.analyze_model || "未配置")}</dd>
     <dt>总结模型</dt><dd>${escapeHtml(cfg.summary_model || "未配置")}</dd>
-    <dt>API Key</dt><dd>${cfg.has_analyze_key && cfg.has_summary_key ? "均已配置" : (cfg.has_analyze_key ? "分析已配，总结未配" : "分析未配")}</dd>`;
+    <dt>API Key</dt><dd>${keyDesc}</dd>`;
 }
 
 function updateStatus(cfg) {
@@ -1000,6 +1003,9 @@ async function loadSettings() {
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
   usageEnabled = cfg.usage_enabled !== false;
   document.getElementById("usage-enabled").checked = usageEnabled;
+  await fillKeyInputs();  // 输入框常驻真实 Key（password 态显示星号）
+  refreshKeyStatus("analyze", cfg);
+  refreshKeyStatus("summary", cfg);
   updateStatus(cfg);
   loadDbStats();
 }
@@ -1102,6 +1108,75 @@ document.getElementById("dedup-enabled").addEventListener("change", (e) => {
 });
 document.getElementById("set-name").addEventListener("change", (e) => {
   autoSave(apiCall("set_report_name", e.target.value.trim()), "汇报人");
+});
+
+/* ===================== 设置页 · API Key 配置 ===================== */
+
+const KEY_GETTERS = {
+  analyze: "在阿里云百炼（platform.aliyuncs.com）获取",
+  summary: "在 DeepSeek 开放平台（platform.deepseek.com）获取",
+};
+const KEY_ELEMS = {
+  analyze: { input: "key-analyze", eye: "key-analyze-eye", test: "key-analyze-test", status: "key-analyze-status" },
+  summary: { input: "key-summary", eye: "key-summary-eye", test: "key-summary-test", status: "key-summary-status" },
+};
+
+function setKeyStatus(ch, text, cls) {
+  const el = document.getElementById(KEY_ELEMS[ch].status);
+  el.textContent = text;
+  el.classList.remove("key-result-ok", "key-result-bad");
+  if (cls) el.classList.add(cls);
+}
+
+// 状态行：已配置显示掩码 + 测试引导，未配置显示获取渠道
+function refreshKeyStatus(ch, cfg) {
+  const has = ch === "analyze" ? cfg.has_analyze_key : cfg.has_summary_key;
+  const hint = ch === "analyze" ? cfg.analyze_key_hint : cfg.summary_key_hint;
+  if (has) setKeyStatus(ch, `已配置 ${hint}，可点"测试连接"验证`, "key-result-ok");
+  else setKeyStatus(ch, KEY_GETTERS[ch]);
+}
+
+// 设置页加载时回填真实 Key 到输入框（password 态显示星号，点眼睛可见）
+async function fillKeyInputs() {
+  const r = await apiCall("get_api_keys");
+  if (r && r.ok) {
+    document.getElementById("key-analyze").value = r.analyze_key || "";
+    document.getElementById("key-summary").value = r.summary_key || "";
+  }
+}
+
+for (const ch of Object.keys(KEY_ELEMS)) {
+  const { input, eye, test } = KEY_ELEMS[ch];
+  document.getElementById(eye).addEventListener("click", () => {
+    const inp = document.getElementById(input);
+    inp.type = inp.type === "password" ? "text" : "password";
+  });
+  document.getElementById(test).addEventListener("click", async () => {
+    const btn = document.getElementById(test);
+    btn.disabled = true;
+    setKeyStatus(ch, "测试中，请稍候…");
+    const r = await apiCall("test_api_connection", ch);
+    btn.disabled = false;
+    if (r && r.ok) setKeyStatus(ch, `✓ 连接成功 · ${(r.latency_ms / 1000).toFixed(1)} 秒`, "key-result-ok");
+    else setKeyStatus(ch, `✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
+  });
+}
+// 保存按钮任何情况可点：输入框常驻真实 Key（星号态），首次输入/修改/未改动统一"保存成功"；
+// set_key 幂等，未改动时重写无副作用。仅任一为空时拦截并提示
+document.getElementById("key-save").addEventListener("click", async () => {
+  const a = document.getElementById("key-analyze").value.trim();
+  const s = document.getElementById("key-summary").value.trim();
+  if (!a || !s) { toast("请先输入 Key 才能使用该应用", 5000); return; }
+  const r = await apiCall("save_api_keys", a, s);
+  if (r && r.ok) {
+    refreshKeyStatus("analyze", r);
+    refreshKeyStatus("summary", r);
+    toast("保存成功");
+    const cfg = await apiCall("get_config");  // 同步"当前状态"面板
+    if (cfg) updateStatus(cfg);
+  } else {
+    toast((r && r.error) || "保存失败", 5000);
+  }
 });
 
 /* ===================== 待办页 ===================== */

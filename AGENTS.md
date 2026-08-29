@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Windows desktop app (Python 3.10+) that auto-captures screenshots every 10 min, analyzes them with a vision model (NVIDIA NIM), and generates daily/weekly reports via DeepSeek. No resident process — Windows Task Scheduler drives capture.
+Windows desktop app (Python 3.10+) that auto-captures screenshots every 10 min, analyzes them with a vision model (Alibaba DashScope), and generates daily/weekly reports via DeepSeek. No resident process — Windows Task Scheduler drives capture.
 
 ## Commands
 
@@ -25,7 +25,7 @@ ui_api.py       → Pure Python API bridge (no GUI deps, testable headlessly)
 core/
   config.py     → All tunable params, paths, .env loading, logging setup
   capture.py    → Screenshot pipeline: idle check → mss → dedup → analyze → write → delete
-  analyze.py    → NVIDIA NIM vision model call + lenient JSON parse
+  analyze.py    → DashScope vision model call + lenient JSON parse
   llm.py        → Unified OpenAI-compatible chat completions (shared requests.Session)
   summarize.py  → DeepSeek daily/weekly report generation
   usage.py      → Foreground window sampling + aggregation
@@ -46,7 +46,7 @@ core/
 ## API Keys
 
 Two keys required in `data/.env` (see `.env.example`):
-- `ANALYZE_API_KEY` — NVIDIA NIM (vision model, default `minimaxai/minimax-m3`)
+- `ANALYZE_API_KEY` — Alibaba DashScope (vision model, see `core/config.py`)
 - `DEEPSEEK_API_KEY` — DeepSeek (report generation)
 
 ## Task Scheduler

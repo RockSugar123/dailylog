@@ -599,6 +599,18 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
   font-size: 13.5px;
 }
 .settings-row input[type="text"]:focus { outline: 2px solid var(--brand); outline-offset: 1px }
+.settings-row input[type="password"] {
+  height: 36px; padding: 0 12px; width: 260px;
+  border-radius: 7px;
+  border: 1px solid var(--panel-border);
+  background: rgba(16, 22, 24, 0.46); color: var(--ink);
+  font-size: 13.5px;
+  letter-spacing: 1px;
+}
+.settings-row input[type="password"]:focus { outline: 2px solid var(--brand); outline-offset: 1px }
+.key-eye { min-width: 40px; height: 36px; padding: 0; font-size: 14px }
+.key-result-ok { color: #4ade80 }
+.key-result-bad { color: #f87171 }
 .set-spacer { flex: 1 }
 .select-wrap { position: relative }
 .select-btn {
@@ -908,7 +920,7 @@ body.theme-paper .side-foot { border-top: 1px solid var(--panel-border) }
 body.theme-paper .side-item::after { background: #fffdf9; color: var(--ink); box-shadow: 0 6px 18px rgba(60, 50, 40, 0.16) }
 
 body.theme-paper input[type="date"], body.theme-paper .select-btn,
-body.theme-paper .settings-row input[type="text"], body.theme-paper .todo-search,
+body.theme-paper .settings-row input[type="text"], body.theme-paper .settings-row input[type="password"], body.theme-paper .todo-search,
 body.theme-paper .modal-input, body.theme-paper .prio-opt, body.theme-paper .todo-status-sel {
   background: #faf7f2; border-color: var(--panel-border);
 }
@@ -1019,7 +1031,7 @@ body.theme-journal .side-item::after { background: #fff9f2; color: var(--ink); b
 
 body.theme-journal input[type="date"] { background: #fff; border-color: var(--panel-border); border-radius: 99px }
 body.theme-journal input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.4) }
-body.theme-journal .select-btn, body.theme-journal .settings-row input[type="text"],
+body.theme-journal .select-btn, body.theme-journal .settings-row input[type="text"], body.theme-journal .settings-row input[type="password"],
 body.theme-journal .todo-search, body.theme-journal .modal-input {
   background: #fff; border-color: var(--panel-border); border-radius: 10px;
 }
@@ -1156,7 +1168,7 @@ body.theme-terminal .side-foot { border-top-color: var(--panel-border) }
 body.theme-terminal .side-item::after { background: #101b16; color: var(--ink); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5) }
 
 body.theme-terminal input[type="date"], body.theme-terminal .select-btn,
-body.theme-terminal .settings-row input[type="text"], body.theme-terminal .todo-search,
+body.theme-terminal .settings-row input[type="text"], body.theme-terminal .settings-row input[type="password"], body.theme-terminal .todo-search,
 body.theme-terminal .modal-input, body.theme-terminal .prio-opt, body.theme-terminal .todo-status-sel {
   background: #0e1713; border-color: var(--panel-border); border-radius: 3px;
 }
@@ -1320,7 +1332,7 @@ body.theme-film .side-item:hover { color: var(--ink) }
 body.theme-film .side-item.active { background: var(--brand-soft); color: var(--ink); border-left-color: var(--brand) }
 
 body.theme-film input[type="date"], body.theme-film .select-btn,
-body.theme-film .settings-row input[type="text"], body.theme-film .todo-search,
+body.theme-film .settings-row input[type="text"], body.theme-film .settings-row input[type="password"], body.theme-film .todo-search,
 body.theme-film .modal-input, body.theme-film .prio-opt, body.theme-film .todo-status-sel {
   background: #201914; border-color: var(--panel-border);
 }
@@ -1395,7 +1407,7 @@ body.theme-mint .side-item::after { background: #ffffff; color: var(--ink); box-
 
 body.theme-mint input[type="date"] { background: #fff; border-color: var(--panel-border); border-radius: 99px }
 body.theme-mint input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.45) }
-body.theme-mint .select-btn, body.theme-mint .settings-row input[type="text"],
+body.theme-mint .select-btn, body.theme-mint .settings-row input[type="text"], body.theme-mint .settings-row input[type="password"],
 body.theme-mint .todo-search, body.theme-mint .modal-input {
   background: #fff; border-color: var(--panel-border); border-radius: 12px;
 }
@@ -1512,7 +1524,7 @@ body.theme-sakura .side-item::after { background: #fffafc; color: var(--ink); bo
 
 body.theme-sakura input[type="date"] { background: #fffdfd; border-color: var(--panel-border); border-radius: 99px }
 body.theme-sakura input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.45) }
-body.theme-sakura .select-btn, body.theme-sakura .settings-row input[type="text"],
+body.theme-sakura .select-btn, body.theme-sakura .settings-row input[type="text"], body.theme-sakura .settings-row input[type="password"],
 body.theme-sakura .todo-search, body.theme-sakura .modal-input {
   background: #fffdfd; border-color: var(--panel-border); border-radius: 12px;
 }
