@@ -375,6 +375,13 @@ class Api:
             "model": config.MODEL_NAME,
             "has_key": bool(config.MODEL_API_KEY),
             "key_hint": _key_hint(config.MODEL_API_KEY),
+            "summary": {
+                "custom": config.MODEL_PROVIDER == "custom",
+                "base_url": config.DEEPSEEK_BASE_URL,
+                "model": config.SUMMARY_MODEL,
+                "has_key": bool(config.DEEPSEEK_API_KEY),
+                "key_hint": _key_hint(config.DEEPSEEK_API_KEY),
+            },
         }
 
     def get_logs(self, limit: int = 300) -> dict:
@@ -423,15 +430,29 @@ class Api:
                 "base_url": str(svc.get("base_url", "")).strip() if pid == "custom" else preset["base_url"],
                 "key": config.model_key_for(pid),
             }
-        return {"ok": True, "provider": config.MODEL_PROVIDER, "services": services}
+        ssvc = config.SUMMARY_SERVICES.get("custom")
+        if not isinstance(ssvc, dict):
+            ssvc = {}
+        return {
+            "ok": True,
+            "provider": config.MODEL_PROVIDER,
+            "services": services,
+            "summary": {
+                "model": str(ssvc.get("model", "")).strip(),
+                "base_url": str(ssvc.get("base_url", "")).strip(),
+                "key": config.summary_key(),
+            },
+        }
 
     def save_model_service(self, provider: str, model: str, key: str = "",
-                           base_url: str = "") -> dict:
-        """保存某供应商的模型服务：模型名写 settings.json 的 model_services，Key 写 .env。
+                           base_url: str = "", summary_model: str = "",
+                           summary_key: str = "", summary_base_url: str = "") -> dict:
+        """保存某供应商的模型服务：模型名写 settings.json，Key 写 .env，保存即生效。
 
         各供应商的模型名/Key 相互独立（.env 键为 MODEL_KEY_<PROVIDER>）。
         key 传空表示不修改该供应商的 Key。预设供应商的 base_url 以代码里的
-        官方端点为准；custom 用前端传的地址。保存即切换生效并同步本进程 config。
+        官方端点为准；custom（双模型）另含「报告总结」一组配置，写
+        summary_services 与 MODEL_KEY_SUMMARY，未填字段按模板预置兜底。
         """
         _logger = config.setup_logging()
         provider = (provider or "").strip()
@@ -445,6 +466,28 @@ class Api:
             base_url = (base_url or "").strip().rstrip("/")
             if not base_url.startswith(("http://", "https://")):
                 return {"ok": False, "error": "自定义供应商需填写以 http(s):// 开头的接口地址"}
+        # custom 双模型：保存「报告总结」一组（字段留空沿用已存值；Key 留空不改）
+        summary_services: dict = {}
+        if provider == "custom":
+            summary_services = {k: dict(v) for k, v in config.SUMMARY_SERVICES.items()
+                                if isinstance(v, dict)}
+            ssvc = summary_services.setdefault("custom", {})
+            smodel = (summary_model or "").strip() or str(ssvc.get("model", "")).strip()
+            if not smodel:
+                return {"ok": False, "error": "请填写总结模型名称"}
+            ssvc["model"] = smodel
+            sbase = (summary_base_url or "").strip().rstrip("/") or str(ssvc.get("base_url", "")).strip()
+            if not sbase.startswith(("http://", "https://")):
+                return {"ok": False, "error": "请填写总结接口地址（http(s):// 开头）"}
+            ssvc["base_url"] = sbase
+            skey = (summary_key or "").strip()
+            if skey:
+                try:
+                    set_key(str(config.DATA_DIR / ".env"), "MODEL_KEY_SUMMARY", skey)
+                except OSError as e:
+                    _logger.error("写入 .env 失败: %s", e)
+                    return {"ok": False, "error": f"写入 .env 失败：{e}"}
+                os.environ["MODEL_KEY_SUMMARY"] = skey  # .env 只在启动时加载，同步进程环境
         key = (key or "").strip()
         if key:
             env_name = f"MODEL_KEY_{provider.upper()}"
@@ -465,12 +508,17 @@ class Api:
         data = dict(config.SETTINGS)
         data["model_provider"] = provider
         data["model_services"] = services
+        if provider == "custom":
+            data["summary_services"] = summary_services
         legacy_gone = data.pop("model_name", None) is not None or data.pop("model_base_url", None) is not None
         config.SETTINGS.pop("model_name", None)   # config.SETTINGS 是 _write_settings 的
         config.SETTINGS.pop("model_base_url", None)  # 合并源，需同步移除才能真正落盘删除
         _write_settings(**data)
         config.MODEL_SERVICES.clear()
         config.MODEL_SERVICES.update(services)
+        if provider == "custom":
+            config.SUMMARY_SERVICES.clear()
+            config.SUMMARY_SERVICES.update(summary_services)
         config.MODEL_PROVIDER = provider
         config._apply_model_service()
         # 只记供应商与模型名，不记 Key
@@ -484,34 +532,45 @@ class Api:
             "model": config.MODEL_NAME,
             "has_key": bool(config.MODEL_API_KEY),
             "key_hint": _key_hint(config.MODEL_API_KEY),
+            "summary_model": config.SUMMARY_MODEL,
+            "summary_has_key": bool(config.DEEPSEEK_API_KEY),
+            "summary_key_hint": _key_hint(config.DEEPSEEK_API_KEY),
         }
 
     def test_model_connection(self, provider: str = "", model: str = "",
-                              key: str = "", base_url: str = "") -> dict:
+                              key: str = "", base_url: str = "",
+                              role: str = "analyze") -> dict:
         """设置页"测试连接"：对表单当前草稿（供应商/模型/Key）发一条极短消息验证连通性。
 
-        Key/模型留空时回退到该供应商已保存值（再回退预设默认模型），
-        方便只改了供应商就想先测的场景。
+        Key/模型/地址留空时回退到该端点已保存值（再回退模板/预设默认），
+        方便只改了供应商就想先测的场景。role="summary" 测自定义双模型的
+        「报告总结」端点，回退链走 summary_services 与总结 Key。
         """
         _logger = config.setup_logging()
         provider = (provider or "").strip() or config.MODEL_PROVIDER
         preset = config.MODEL_PRESETS.get(provider)
         if not preset:
             return {"ok": False, "error": f"未知供应商: {provider}"}
-        if not model or not str(model).strip():
-            svc = config.MODEL_SERVICES.get(provider)
-            model = (str(svc.get("model", "")).strip()
-                     if isinstance(svc, dict) else "") or preset["default_model"]
-        model = str(model).strip()
+        if provider == "custom":
+            summary = role == "summary"
+            svc = config.SUMMARY_SERVICES.get("custom") if summary else config.MODEL_SERVICES.get("custom")
+            if not isinstance(svc, dict):
+                svc = {}
+            base_url = (base_url or "").strip().rstrip("/") or str(svc.get("base_url", "")).strip()
+            model = (model or "").strip() or str(svc.get("model", "")).strip()
+            key = (key or "").strip() or (config.summary_key() if summary else config.model_key_for("custom"))
+        else:
+            if not model or not str(model).strip():
+                svc = config.MODEL_SERVICES.get(provider)
+                model = (str(svc.get("model", "")).strip()
+                         if isinstance(svc, dict) else "") or preset["default_model"]
+            model = str(model).strip()
+            base_url = preset["base_url"]
+            key = (key or "").strip() or config.model_key_for(provider)
         if not model:
             return {"ok": False, "error": "请先填写模型名称"}
-        if provider == "custom":
-            base_url = (base_url or "").strip().rstrip("/")
-            if not base_url.startswith(("http://", "https://")):
-                return {"ok": False, "error": "自定义供应商需先填写接口地址"}
-        else:
-            base_url = preset["base_url"]
-        key = (key or "").strip() or config.model_key_for(provider)
+        if not base_url.startswith(("http://", "https://")):
+            return {"ok": False, "error": "接口地址需以 http(s):// 开头"}
         if not key:
             return {"ok": False, "error": "尚未配置 API Key，请先填写并保存"}
         result = llm.test_chat(base_url, key, model)
@@ -574,7 +633,7 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def set_dedup(self, enabled: bool) -> dict:
-        """跳过重复画面开关（capture.py 的 md5 去重，默认开）。"""
+        """跳过重复画面开关（capture.py 的感知哈希去重，默认开）。"""
         _write_settings(dedup_enabled=bool(enabled))
         config.DEDUP_ENABLED = bool(enabled)
         return {"ok": True, "dedup_enabled": bool(enabled)}

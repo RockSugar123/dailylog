@@ -266,6 +266,11 @@
               <div class="select-pop" id="provider-pop" hidden></div>
             </div>
           </div>
+          <!-- 自定义（双模型）分组标题，仅选自定义供应商时显示 -->
+          <div class="settings-row" id="ana-divider" hidden>
+            <label><b>分析模型</b></label>
+            <span class="hint">截图识别用，需支持图像输入</span>
+          </div>
           <div class="settings-row" id="base-url-row" hidden>
             <label for="base-url-input">接口地址</label>
             <input type="text" id="base-url-input" class="key-input" placeholder="https://…/v1（OpenAI 兼容端点）" autocomplete="off" />
@@ -283,6 +288,25 @@
           <div class="settings-row">
             <label></label>
             <span class="hint" id="key-model-status">正在加载模型服务配置…</span>
+          </div>
+          <!-- 自定义（双模型）专用：「报告总结」一组，仅选自定义供应商时显示 -->
+          <div class="settings-row" id="sum-divider" hidden>
+            <label><b>总结模型</b></label>
+            <span class="hint">日报/周报生成用</span>
+          </div>
+          <div class="settings-row" id="sum-base-url-row" hidden>
+            <label for="sum-base-url-input">接口地址</label>
+            <input type="text" id="sum-base-url-input" class="key-input" placeholder="https://…（OpenAI 兼容端点）" autocomplete="off" />
+          </div>
+          <div class="settings-row" id="sum-model-row" hidden>
+            <label for="sum-model-input">模型</label>
+            <input type="text" id="sum-model-input" class="key-input" placeholder="填写模型名称" autocomplete="off" />
+          </div>
+          <div class="settings-row" id="sum-key-row" hidden>
+            <label for="key-sum">API Key</label>
+            <input type="password" id="key-sum" class="key-input" placeholder="粘贴 API Key（留空不修改）" autocomplete="off" />
+            <button class="btn-ghost key-eye" id="key-sum-eye" title="显示/隐藏">🙈</button>
+            <button class="btn-primary" id="key-sum-test">测试连接</button>
           </div>
           <div class="settings-row">
             <label></label>
