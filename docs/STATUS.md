@@ -3,7 +3,7 @@
 > 约定：只维护这一个状态文档。每次会话结束时更新「当前状态」「遗留 / 注意事项」，
 > 过程性记录压缩进「变更日志」。历史详情见 git log。
 
-## 当前架构要点（截至 2026-08-25）
+## 当前架构要点（截至 2026-08-29）
 
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
@@ -30,6 +30,16 @@
   analyze 的 prompt 追加【当前前台窗口】块
 - 隐私决策：进程名 + 标题只进 prompt 不落盘 jsonl（标题本来就在截图里可见，泄露面未增加）
 
+### 统一模型服务（2026-08-29 落地）
+- `config.MODEL_PRESETS`：预设供应商表（官方 OpenAI 兼容 base_url 代码内置，用户改不了）；
+  当前生效供应商 = `settings.json` 的 `model_provider`，截图分析与日报生成共用
+- `_apply_model_service()` 把当前供应商解析进模块变量并经 `ANALYZE_*`/`DEEPSEEK_*`
+  别名暴露（analyze.py/summarize.py 与任务计划独立进程零改动）；
+  `ui_api.save_model_service` 保存后调用它 + 同步 `os.environ`
+  （`.env` 只在启动时 load_dotenv，进程内保存必须补环境变量）
+- Key 解析链在 `config.model_key_for()`：`MODEL_KEY_<供应商ID大写>` →
+  旧键按归属回退（仅 dashscope ← ANALYZE_API_KEY、deepseek ← DEEPSEEK_API_KEY）
+
 ## 内存优化遗留方案（按收益排序，均未实施）
 1. **GPU 进程瘦身**（GPU ~300MB 是最大单项）：`--disable-gpu` 可砍大半但玻璃拟态 backdrop-filter 会卡；
    且 pywebview 6.2.1 把 AdditionalBrowserArguments 写死在 edgechromium.py:82，需 monkey-patch（升级易碎）
@@ -44,8 +54,31 @@
 - 改前端必须重跑 build.bat 部署到 `Desktop\dailylog-app` 才生效
 - 换部署位置时三处同步：桌面快捷方式、任务计划 DailyLogCapture/DailyLogUsage、build.bat 的 DEPLOY_DIR
 - 维护与打包约定见 `docs/MAINTENANCE.md`
+- 默认模型有时效性：供应商下架/更名后改 `config.MODEL_PRESETS` 的 `default_model` 即可
+  （用户已保存的 model_services 不受影响）
+- 新增预设供应商的前提：OpenAI 兼容端点 + 支持多模态视觉输入（截图分析需要）
 
 ## 变更日志（摘要）
+
+### 2026-08-29 模型服务重构：预设供应商下拉（4426373）
+- 设置页模型服务面板：原「截图分析 / 日报总结」双 Key 改为**预设供应商下拉**
+  （千问/智谱/OpenAI/Kimi/硅基流动/豆包/DeepSeek/自定义），官方 OpenAI 兼容端点
+  内置 `config.MODEL_PRESETS`，用户只填模型名称 + Key
+- **按供应商独立记忆**：模型名存 `settings.json` 的 `model_services`
+  （{pid: {model, base_url?}}），Key 存 `.env` 的 `MODEL_KEY_<供应商ID大写>`；
+  切换下拉即时联动回显，未保存过为空白
+- 截图分析与日报生成**统一走当前生效供应商**（预设均多模态）；config 经
+  `ANALYZE_*`/`DEEPSEEK_*` 别名兼容 analyze.py/summarize.py 及任务计划独立进程，
+  无需改调用点
+- 旧 Key 按归属回退：`ANALYZE_API_KEY`→千问、`DEEPSEEK_API_KEY`→DeepSeek
+  （旧统一键 `MODEL_API_KEY` 仅作千问回退，保存时自动清理旧版统一键）
+- 默认模型均为 2026-08 核实的在售多模态型号：`glm-5.3-flash`/`gpt-5-mini`/
+  `kimi-k3`/`Qwen3-VL-32B`/`doubao-seed-1-6-vision-250815`/`deepseek-v4-flash-vision-exp`
+- 前端 API 替换：`get_model_service`/`save_model_service`/`test_model_connection`
+  （测试按表单草稿、Key 留空回退已存值）替代旧的双 Key 三接口；
+  导出白名单加 `model_services`（Key 照旧永不进备份）
+- fix：采样常量 `ANALYZE_TEMPERATURE/TOP_P/MAX_TOKENS` 重构时误置函数内，
+  模块属性缺失致截屏分析全量报 AttributeError，已挪回模块级
 
 ### 2026-08-25 新功能：生成指定日期的日报（fe718d7）
 - 日报周报页新增日期选择器 + 「生成该日日报」按钮（默认今天；校验非空、不允许未来日期）
