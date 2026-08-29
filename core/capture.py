@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import base64
 import ctypes
-import hashlib
 import json
 import re
 import time
@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 
 import mss
 import mss.tools
+from PIL import Image
 
 from core import analyze, config, usage
 
@@ -108,6 +109,87 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     config.STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+
+
+def _workarea_crop_box(monitor: dict):
+    """工作区（不含任务栏）在截图里的像素范围 (left, top, right, bottom)；取不到返回 None。
+
+    SPI_GETWORKAREA 只返回主屏工作区，而主屏在 Windows 恒位于原点，因此仅在
+    截的就是原点主屏时才裁剪；该 API 与 mss 用的是同一套（进程 DPI 虚拟化）
+    坐标，可直接换算。任务栏时钟每分钟必变，不裁掉它签名就会一直变。
+    """
+    if config.MONITOR_INDEX != 1 or monitor.get("left") or monitor.get("top"):
+        return None
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    user32 = ctypes.windll.user32
+    user32.SystemParametersInfoW.argtypes = [
+        ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    user32.SystemParametersInfoW.restype = ctypes.c_bool
+    rect = RECT()
+    if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):  # SPI_GETWORKAREA
+        return None
+    left, top = max(0, rect.left), max(0, rect.top)
+    right = min(monitor["width"], rect.right)
+    bottom = min(monitor["height"], rect.bottom)
+    if right - left < monitor["width"] / 2 or bottom - top < monitor["height"] / 2:
+        return None  # 工作区异常（不足半屏）不裁，保守处理
+    return (left, top, right, bottom)
+
+
+def _screen_signature(rgb: bytes, size: tuple, crop_box) -> bytes:
+    """画面感知签名：裁掉任务栏后缩到 32×32 灰度图（1 字节/像素）。
+
+    整屏原始字节的 md5 会被任务栏时钟、光标位置击穿（每次必不同）；
+    降到 32×32 后这类亚像素级抖动落进比较阈值，真实内容变化则明显超阈。
+    """
+    img = Image.frombytes("RGB", size, rgb)
+    if crop_box:
+        img = img.crop(crop_box)
+    return img.convert("L").resize(config.DEDUP_SIG_SIZE, Image.LANCZOS).tobytes()
+
+
+def _dhash_bits(gray: bytes) -> int:
+    """灰度图 dHash：每行相邻像素的梯度位（右像素更亮记 1）。"""
+    w, h = config.DEDUP_SIG_SIZE
+    bits = 0
+    for y in range(h):
+        row = gray[y * w:(y + 1) * w]
+        for x in range(w - 1):
+            bits = (bits << 1) | (row[x + 1] > row[x])
+    return bits
+
+
+def _screen_changed(prev: bytes, cur: bytes) -> bool:
+    """两帧签名比较：dHash 汉明距离或灰度平均像素差超阈即视为"画面变了"。
+
+    汉明距离抓结构变化（如角落弹出小通知，均值几乎不动但布局变了），
+    像素差抓整体亮度变化；任一超阈都按变化处理。
+    """
+    hamming = bin(_dhash_bits(prev) ^ _dhash_bits(cur)).count("1")
+    diff = sum(abs(a - b) for a, b in zip(prev, cur)) / len(cur)
+    return hamming > config.DEDUP_HASH_BITS or diff > config.DEDUP_PIXEL_DIFF
+
+
+def _encode_sig(gray: bytes) -> str:
+    """签名（灰度字节串）→ state.json 可存的 base64。"""
+    return base64.b64encode(gray).decode("ascii")
+
+
+def _decode_sig(data) -> bytes | None:
+    """state.json 里的签名还原为字节串；缺失/损坏/尺寸不符返回 None（当无上帧处理）。"""
+    if not isinstance(data, str):
+        return None
+    try:
+        gray = base64.b64decode(data)
+    except ValueError:
+        return None
+    if len(gray) != config.DEDUP_SIG_SIZE[0] * config.DEDUP_SIG_SIZE[1]:
+        return None
+    return gray
 
 
 def _report_date(name: str):
@@ -227,6 +309,9 @@ def main(force: bool = False) -> int:
     if not config.ANALYZE_API_KEY:
         log("未配置模型服务 API Key，请在应用设置页或 .env 中填写后重试")
         return 1
+    if not config.ANALYZE_BASE_URL or not config.ANALYZE_MODEL:
+        log("自定义模型未配置完整（接口地址/模型名称），请在设置页「模型服务」中填写")
+        return 1
 
     if not force and config.IDLE_ENABLED and last_input_idle_seconds() > config.IDLE_MINUTES * 60:
         log(f"鼠标空闲超过 {config.IDLE_MINUTES} 分钟，跳过本次")
@@ -252,16 +337,19 @@ def main(force: bool = False) -> int:
                     log("屏幕为黑屏/睡眠，跳过本次")
                     return 0
 
-                digest = hashlib.md5(raw.raw).hexdigest()
+                rgb = raw.rgb  # 签名与保存 PNG 复用同一份 RGB 字节
                 state = load_state()
+                sig = _screen_signature(rgb, raw.size, _workarea_crop_box(monitor))
+                prev_sig = _decode_sig(state.get("last_sig"))
                 # 上次分析失败（last_failed）时放行：即使画面未变也重试，避免去重把重试挡掉
                 # dedup_enabled=False（设置页"跳过重复画面"关闭）时不去重，每次都识别
-                if not force and config.DEDUP_ENABLED and digest == state.get("last_hash") and not state.get("last_failed"):
+                if (not force and config.DEDUP_ENABLED and prev_sig is not None
+                        and not state.get("last_failed") and not _screen_changed(prev_sig, sig)):
                     log("画面无变化，跳过本次")
                     return 0
 
                 png_path = config.SCREENSHOTS_DIR / f"{ts:%Y%m%d_%H%M%S}.png"
-                mss.tools.to_png(raw.rgb, raw.size, output=str(png_path))
+                mss.tools.to_png(rgb, raw.size, output=str(png_path))
             finally:
                 _show_app_windows(hidden)  # 截图已保存，立即恢复被隐藏的窗口
     except Exception as e:
@@ -316,10 +404,10 @@ def main(force: bool = False) -> int:
                 "detail": "", "progress": "", "todo": "", "apps": [], "contains_sensitive": False,
             }
             append_record(ts, record)
-        save_state({"last_hash": digest, "last_failed": True})
+        save_state({"last_sig": _encode_sig(sig), "last_failed": True})
         return 1
 
-    save_state({"last_hash": digest})  # 成功：整体覆盖 state.json，同时清除 last_failed 标记
+    save_state({"last_sig": _encode_sig(sig)})  # 成功：整体覆盖 state.json，同时清除 last_failed 标记
     append_record(ts, record)
     log(f"已记录: {record['activity']} | {record['summary'][:30]}")
     return 0

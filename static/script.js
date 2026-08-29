@@ -947,8 +947,8 @@ function statusHtml(cfg) {
     <dt>定时记录</dt><dd class="${cfg.recording_enabled ? "ok" : "bad"}">${cfg.recording_enabled ? "运行中" : "已停用"}</dd>
     <dt>下次截屏</dt><dd>${next}</dd>
     <dt>空闲暂停</dt><dd>${cfg.idle_enabled ? `静止 ${cfg.idle_minutes} 分钟暂停` : "关闭"}</dd>
-    <dt>模型服务</dt><dd>${escapeHtml(cfg.provider_label || "")} · ${escapeHtml(cfg.model || "未配置")}</dd>
-    <dt>API Key</dt><dd class="${cfg.has_key ? "ok" : "bad"}">${keyDesc}</dd>`;
+    <dt>模型服务</dt><dd>${escapeHtml(cfg.provider_label || "")} · ${escapeHtml(cfg.model || "未配置")}${cfg.summary && cfg.summary.custom ? `<br>总结：${escapeHtml(cfg.summary.model || "未配置")}` : ""}</dd>
+    <dt>API Key</dt><dd class="${cfg.has_key && (!cfg.summary || !cfg.summary.custom || cfg.summary.has_key) ? "ok" : "bad"}">${keyDesc}${cfg.summary && cfg.summary.custom ? (cfg.summary.has_key ? " / 总结已配置" : " / 总结未配置") : ""}</dd>`;
 }
 
 function updateStatus(cfg) {
@@ -1109,6 +1109,7 @@ document.getElementById("set-name").addEventListener("change", (e) => {
 
 let modelPresets = [];   // 后端下发：{id,label,base_url,default_model,hint}
 let serviceCache = {};   // pid → {model,base_url,key}，切换供应商时据此联动回显
+let summaryCache = { model: "", base_url: "", key: "" };  // 自定义双模型的「报告总结」
 let currentProvider = "";
 
 function presetById(id) { return modelPresets.find((p) => p.id === id); }
@@ -1121,17 +1122,27 @@ function setModelStatus(text, cls) {
 }
 
 // 切供应商：模型名称/接口地址/Key 联动换成该供应商已保存的（没保存过则为空白），
-// 模型名占位提示展示该供应商默认值，自定义供应商显隐接口地址行
+// 模型名占位提示展示该供应商默认值，自定义供应商额外分出「报告总结」一组
 function applyProviderUI(id) {
   const p = presetById(id) || {};
   const svc = serviceCache[id] || {};
+  const custom = id === "custom";
   currentProvider = id;
   document.getElementById("model-name-input").value = svc.model || "";
   document.getElementById("base-url-input").value = svc.base_url || "";
   document.getElementById("key-model").value = svc.key || "";
   document.getElementById("model-name-input").placeholder =
     p.default_model ? `留空用默认 ${p.default_model}` : "填写模型名称";
-  document.getElementById("base-url-row").hidden = id !== "custom";
+  document.getElementById("base-url-row").hidden = !custom;
+  document.getElementById("ana-divider").hidden = !custom;
+  ["sum-divider", "sum-base-url-row", "sum-model-row", "sum-key-row"]
+    .forEach((rid) => (document.getElementById(rid).hidden = !custom));
+  document.querySelector('label[for="model-name-input"]').textContent = custom ? "模型" : "模型名称";
+  if (custom) {
+    document.getElementById("sum-base-url-input").value = summaryCache.base_url || "";
+    document.getElementById("sum-model-input").value = summaryCache.model || "";
+    document.getElementById("key-sum").value = summaryCache.key || "";
+  }
   if (svc.key) setModelStatus(`已配置 ${maskKey(svc.key)}，可点"测试连接"验证`, "key-result-ok");
   else setModelStatus(p.hint || "");
 }
@@ -1147,6 +1158,7 @@ async function fillModelService(cfg) {
   const r = await apiCall("get_model_service");
   if (r && r.ok) {
     serviceCache = r.services || {};
+    summaryCache = r.summary || summaryCache;
     currentProvider = r.provider || cfg.provider || modelPresets[0]?.id || "dashscope";
   } else {
     currentProvider = cfg.provider || modelPresets[0]?.id || "dashscope";
@@ -1164,6 +1176,13 @@ document.getElementById("key-model-eye").addEventListener("click", () => {
   else { inp.type = "password"; btn.textContent = "🙈"; }  // 闭眼：星号遮蔽
 });
 
+document.getElementById("key-sum-eye").addEventListener("click", () => {
+  const inp = document.getElementById("key-sum");
+  const btn = document.getElementById("key-sum-eye");
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "👁"; }
+  else { inp.type = "password"; btn.textContent = "🙈"; }
+});
+
 // 测的是表单草稿（供应商/模型/Key），Key 留空时后端回退用已保存的
 document.getElementById("key-model-test").addEventListener("click", async () => {
   const btn = document.getElementById("key-model-test");
@@ -1178,18 +1197,42 @@ document.getElementById("key-model-test").addEventListener("click", async () => 
   else setModelStatus(`✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
 });
 
-// 保存：写入当前供应商的模型名与 Key（Key 留空表示不修改），并切换为生效供应商
+// 测「报告总结」端点草稿（仅自定义双模型；role=summary 走总结的回退链）
+document.getElementById("key-sum-test").addEventListener("click", async () => {
+  const btn = document.getElementById("key-sum-test");
+  btn.disabled = true;
+  setModelStatus("测试总结模型中，请稍候…");
+  const r = await apiCall("test_model_connection", "custom",
+    document.getElementById("sum-model-input").value.trim(),
+    document.getElementById("key-sum").value.trim(),
+    document.getElementById("sum-base-url-input").value.trim(), "summary");
+  btn.disabled = false;
+  if (r && r.ok) setModelStatus(`✓ 总结模型连接成功 · ${(r.latency_ms / 1000).toFixed(1)} 秒`, "key-result-ok");
+  else setModelStatus(`✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
+});
+
+// 保存：写入当前供应商的模型名与 Key（Key 留空表示不修改），并切换为生效供应商；
+// 自定义（双模型）随表单一并保存「报告总结」一组
 document.getElementById("model-save").addEventListener("click", async () => {
+  const custom = currentProvider === "custom";
   const r = await apiCall("save_model_service", currentProvider,
     document.getElementById("model-name-input").value.trim(),
     document.getElementById("key-model").value.trim(),
-    document.getElementById("base-url-input").value.trim());
+    document.getElementById("base-url-input").value.trim(),
+    custom ? document.getElementById("sum-model-input").value.trim() : "",
+    custom ? document.getElementById("key-sum").value.trim() : "",
+    custom ? document.getElementById("sum-base-url-input").value.trim() : "");
   if (r && r.ok) {
-    if (r.has_key) setModelStatus(`已配置 ${r.key_hint}，可点"测试连接"验证`, "key-result-ok");
+    if (r.has_key && (!custom || r.summary_has_key)) setModelStatus("已配置，可点\"测试连接\"验证", "key-result-ok");
+    else if (r.has_key) setModelStatus(`分析模型 ${r.key_hint || ""} 已配置；总结模型未配置 Key`, "key-result-bad");
     else setModelStatus("已保存供应商与模型，但尚未配置 API Key", "key-result-bad");
-    toast(`已保存并生效：${r.provider_label || ""} · ${r.model || ""}`);
+    toast(`已保存并生效：${r.provider_label || ""} · ${r.model || ""}` +
+      (custom ? ` / 总结 ${r.summary_model || ""}` : ""));
     const fresh = await apiCall("get_model_service");  // 刷新各供应商缓存
-    if (fresh && fresh.ok) serviceCache = fresh.services || serviceCache;
+    if (fresh && fresh.ok) {
+      serviceCache = fresh.services || serviceCache;
+      summaryCache = fresh.summary || summaryCache;
+    }
     const cfg = await apiCall("get_config");  // 同步"当前状态"面板
     if (cfg) updateStatus(cfg);
   } else {
@@ -1374,14 +1417,14 @@ document.getElementById("side-privacy").addEventListener("click", () => {
   openModal("隐私保护",
     `<p>1. <b>即用即删</b>：截屏只在分析瞬间存在，分析完立即删除，磁盘不保留原始画面。</p>
      <p>2. <b>输出脱敏</b>：分析模型被要求不输出密码、密钥、验证码、联系人身份、私人聊天内容等，只用占位符概括。</p>
-     <p>3. <b>边界说明</b>：截屏明文会上传 NVIDIA NIM 服务端，脱敏规则只约束"输出"，不约束"输入"。</p>
+     <p>3. <b>边界说明</b>：截屏明文会上传到所配置的模型服务端，脱敏规则只约束"输出"，不约束"输入"。</p>
      <p>4. 时间线记录仅保存在本机 dailylog 目录。</p>`);
 });
 document.getElementById("side-about").addEventListener("click", () => {
   openModal("关于",
     `<p><b>dailylog · 今日轨迹</b></p>
      <p>每 10 分钟自动截屏分析，把一天的工作记录成时间线，一键生成日报周报。</p>
-     <p style="color:var(--faint);font-size:12px">截图分析：minimaxai/minimax-m3（NVIDIA NIM）<br>日报周报：deepseek-v4-flash（DeepSeek）</p>`);
+     <p style="color:var(--faint);font-size:12px">当前模型服务见「设置 → 模型服务」。</p>`);
 });
 
 /* ===================== 事件绑定 ===================== */

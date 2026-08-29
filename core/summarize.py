@@ -1,4 +1,4 @@
-"""手动生成日报/周报：读取 raw 记录 → 千问文本模型 → reports/。
+"""手动生成日报/周报：读取 raw 记录 → 总结模型 → reports/。
 
 用法：
     python core/summarize.py                    # 今天的日报
@@ -209,7 +209,7 @@ def build_input_text(days: list) -> str:
 
 
 def call_messages(messages: list, max_tokens: int = None) -> str:
-    """调 DeepSeek 官方 API，返回模型回复的 content。"""
+    """调总结端点（DEEPSEEK_* 别名，预设供应商下与截图分析同模型），返回 content。"""
     kwargs = {"temperature": 0.3}
     if max_tokens:
         kwargs["max_tokens"] = max_tokens
@@ -226,6 +226,8 @@ def generate_report(day: str = None, week: str = None) -> tuple:
     """
     if not config.DEEPSEEK_API_KEY:
         raise ValueError("未配置模型服务 API Key，请在应用设置页或 .env 中填写")
+    if not config.DEEPSEEK_BASE_URL or not config.SUMMARY_MODEL:
+        raise ValueError("总结模型未配置完整（接口地址/模型名称），请在设置页「模型服务」中填写")
 
     today = datetime.now()
     if week:

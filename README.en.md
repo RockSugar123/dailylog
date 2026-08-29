@@ -28,7 +28,7 @@ One more thing: whenever you download any project, **always review the code for 
 ## ✨ Features
 
 - **Automatic recording**: Windows Task Scheduler drives a screenshot-and-analyze cycle every 10 minutes — no resident process needed
-- **Smart skipping**: pauses when mouse/keyboard are idle (≥5 min by default), skips black screens/sleep, deduplicates identical frames (md5 comparison)
+- **Smart skipping**: pauses when mouse/keyboard are idle (≥5 min by default), skips black screens/sleep, deduplicates near-identical frames (perceptual hash — taskbar clock ticks and cursor jitter don't trigger re-analysis)
 - **Manual capture**: a button on the Settings page takes a screenshot after a 5-second countdown; the app hides its own window during capture so it never appears in screenshots
 - **Timeline browsing**: view activity trails by day/week/month, category time distribution, and focus-time estimates
 - **App usage stats**: foreground process sampling, aggregated per app by day/week/month
