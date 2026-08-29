@@ -30,15 +30,31 @@
   analyze 的 prompt 追加【当前前台窗口】块
 - 隐私决策：进程名 + 标题只进 prompt 不落盘 jsonl（标题本来就在截图里可见，泄露面未增加）
 
-### 统一模型服务（2026-08-29 落地）
+### 画面感知去重（2026-08-29 落地）
+- 原「跳过重复画面」用整屏原始字节 md5 全等：任务栏时钟（10 分钟档必跳分钟位）、
+  光标移动都会击穿，生产 58 次成功 0 次跳过，去重形同虚设
+- 改为感知签名：裁掉任务栏（SPI_GETWORKAREA，仅原点主屏适用）→ 32×32 灰度图存
+  `state.json` 的 `last_sig`（base64，跨进程持久化），比对 dHash 汉明距离（阈值
+  `DEDUP_HASH_BITS=12`）或平均像素差（`DEDUP_PIXEL_DIFF=1.5`）任一超阈即视为变化
+- 阈值实测依据：静态底噪 ≤8 位（视频窗口微动），最小真实变化（角落通知）17 位；
+  未裁到任务栏时时钟跳变仅 1 位，阈值兜底有效
+- `last_failed`（上轮分析失败）仍放行重试；手动截屏 force 仍跳过去重；
+  旧 `last_hash` 首轮自动迁移（多记录一次）
+
+### 统一模型服务（2026-08-29 落地，同日晚补自定义双模型）
 - `config.MODEL_PRESETS`：预设供应商表（官方 OpenAI 兼容 base_url 代码内置，用户改不了）；
-  当前生效供应商 = `settings.json` 的 `model_provider`，截图分析与日报生成共用
+  当前生效供应商 = `settings.json` 的 `model_provider`。预设供应商下截图分析与日报生成
+  **共用一个模型**；`custom`（自定义）为双模型模式：分析走 `model_services["custom"]`
+  （Key: `MODEL_KEY_CUSTOM`），总结走 `summary_services["custom"]`（Key: `MODEL_KEY_SUMMARY`），
+  完全手填无任何模型预置，未配全时 capture/summarize 给"去设置页填写"提示
 - `_apply_model_service()` 把当前供应商解析进模块变量并经 `ANALYZE_*`/`DEEPSEEK_*`
   别名暴露（analyze.py/summarize.py 与任务计划独立进程零改动）；
   `ui_api.save_model_service` 保存后调用它 + 同步 `os.environ`
   （`.env` 只在启动时 load_dotenv，进程内保存必须补环境变量）
-- Key 解析链在 `config.model_key_for()`：`MODEL_KEY_<供应商ID大写>` →
-  旧键按归属回退（仅 dashscope ← ANALYZE_API_KEY、deepseek ← DEEPSEEK_API_KEY）
+- Key 解析链在 `config.model_key_for()` / `config.summary_key()`：
+  `MODEL_KEY_<供应商ID大写>` → 旧键按归属回退（dashscope/custom ← ANALYZE_API_KEY、
+  deepseek/总结 ← DEEPSEEK_API_KEY）；settings 未记录供应商时 `_default_provider()`
+  按 `nvapi-` 前缀默认进自定义，否则 dashscope
 
 ## 内存优化遗留方案（按收益排序，均未实施）
 1. **GPU 进程瘦身**（GPU ~300MB 是最大单项）：`--disable-gpu` 可砍大半但玻璃拟态 backdrop-filter 会卡；
@@ -57,8 +73,24 @@
 - 默认模型有时效性：供应商下架/更名后改 `config.MODEL_PRESETS` 的 `default_model` 即可
   （用户已保存的 model_services 不受影响）
 - 新增预设供应商的前提：OpenAI 兼容端点 + 支持多模态视觉输入（截图分析需要）
+- 海外端点（如 NVIDIA NIM）直连受跨境波动影响：`llm._post_chat` 直连优先，
+  连接级失败自动经系统代理重试一次并按端点记忆（进程内）——国内端点行为不变；
+  代理工具需在线，否则海外端点不可用（报错已提示）
 
 ## 变更日志（摘要）
+
+### 2026-08-29 画面感知去重 + 自定义双模型 + 代理自动回退
+- **去重失效修复**：整屏 md5 被任务栏时钟/光标击穿（生产 58 成功 0 跳过），
+  改感知签名（见架构要点「画面感知去重」）；state.json `last_hash` → `last_sig` 自动迁移
+- **自定义双模型**：custom 拆「截图分析 / 报告总结」两组端点/模型/Key 独立配置
+  （settings.json 新增 `summary_services`，Key `MODEL_KEY_SUMMARY`）；
+  自定义无任何模型预置（个人配置不进代码），两组保存必填校验；
+  `nvapi-` 旧键自动进自定义模式；UI 分组表单 + 两组独立测试连接
+- **llm.py 代理自动回退**：直连优先，连接级失败经系统代理重试一次（按端点
+  进程内记忆）；超时/429 报错友好化。历史日志佐证：5 天 58 成功 0 连接超时，
+  直连常态可用，回退仅兜波动窗口（9×429 为 NIM 免费档限流，与代理无关）
+- 文档同步：README 中英文去重描述、analyze/summarize/关于弹窗的 NIM 残留文案清理；
+  build.bat 重新打包部署验证（生产 16:52 起连续成功）
 
 ### 2026-08-29 模型服务重构：预设供应商下拉（4426373）
 - 设置页模型服务面板：原「截图分析 / 日报总结」双 Key 改为**预设供应商下拉**
