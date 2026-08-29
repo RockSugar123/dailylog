@@ -1,4 +1,4 @@
-"""调用 NVIDIA NIM 视觉模型分析截图，返回结构化记录。"""
+"""调用视觉模型分析截图，返回结构化记录。"""
 import base64
 import io
 import json
@@ -58,8 +58,7 @@ REQUIRED_FIELDS = ("activity", "summary", "detail", "progress", "todo", "apps", 
 def encode_image(png_path: Path) -> str:
     """截图 → 缩放 JPEG → base64 data URL。
 
-    NIM 部署限制请求体大小，4K 屏的原始 PNG base64 后动辄超限（HTTP 400
-    "Request payload is too large"），必须先缩放并转 JPEG 压缩。
+    服务端限制请求体大小，4K 屏的原始 PNG base64 后动辄超限，必须先缩放并转 JPEG 压缩。
     """
     img = Image.open(png_path).convert("RGB")
     if max(img.size) > config.ANALYZE_IMAGE_MAX_SIDE:
@@ -98,7 +97,7 @@ def normalize(result: dict) -> dict:
 
 
 def call_analyze(image_url: str, existing_todos: list = None, foreground: str = "") -> dict:
-    """调 NVIDIA NIM 视觉模型分析截图，返回规范化 dict；失败抛异常。
+    """调视觉模型分析截图，返回规范化 dict；失败抛异常。
 
     existing_todos：当日已提取的待办列表，随请求带给模型做去重，
     避免同一件事被反复生成待办（碎片化）。
@@ -134,5 +133,6 @@ def call_analyze(image_url: str, existing_todos: list = None, foreground: str = 
         top_p=config.ANALYZE_TOP_P,
         max_tokens=config.ANALYZE_MAX_TOKENS,
         stream=False,
+        thinking={"type": "enabled" if config.ANALYZE_THINKING else "disabled"},
     )
     return normalize(parse_json(content))

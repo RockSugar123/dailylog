@@ -48,18 +48,20 @@ def setup_logging() -> logging.Logger:
     logger.addHandler(handler)
     return logger
 
-# 截图分析 API（NVIDIA NIM miniMax M3 视觉模型，OpenAI 兼容端点）
-ANALYZE_API_KEY = os.getenv("ANALYZE_API_KEY", "").strip()
-ANALYZE_BASE_URL = "https://integrate.api.nvidia.com/v1"
-ANALYZE_MODEL = "minimaxai/minimax-m3"
+# 截图分析 API（DeepSeek 官方多模态模型，OpenAI 兼容端点）
+# 未单独填 ANALYZE_API_KEY 时回退用 DEEPSEEK_API_KEY，只申请一个 DeepSeek Key 即可全跑通
+ANALYZE_API_KEY = os.getenv("ANALYZE_API_KEY", "").strip() or os.getenv("DEEPSEEK_API_KEY", "").strip()
+ANALYZE_BASE_URL = "https://api.deepseek.com"
+ANALYZE_MODEL = "deepseek-v4-flash-vision-exp"
 ANALYZE_TEMPERATURE = 1
 ANALYZE_TOP_P = 0.95
 ANALYZE_MAX_TOKENS = 4096
+ANALYZE_THINKING = False  # 截图分析禁用思考模式：更快更省，结构化 JSON 输出足够
 
-# 日报/周报总结 API（DeepSeek 官方）
+# 日报/周报总结 API（DeepSeek 官方，与截图分析共用同一模型）
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-SUMMARY_MODEL = "deepseek-v4-flash"
+SUMMARY_MODEL = "deepseek-v4-flash-vision-exp"
 
 # 截屏调度
 MONITOR_INDEX = 1                # mss 监控器编号，1 = 主屏
