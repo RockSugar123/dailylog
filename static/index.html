@@ -378,6 +378,35 @@
             <button class="btn-danger" id="clear-data">🗑 删除</button>
           </div>
           <div class="settings-row">
+            <label>自动备份</label>
+            <label class="switch-label"><input type="checkbox" id="backup-enabled" checked /> 每周自动把 data/ 打包 zip 到备份目录</label>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <div class="select-wrap" id="backup-weekday-wrap">
+              <button class="select-btn" id="backup-weekday-btn">周日<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-weekday-pop" hidden></div>
+            </div>
+            <div class="select-wrap" id="backup-hour-wrap">
+              <button class="select-btn" id="backup-hour-btn">12:00<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-hour-pop" hidden></div>
+            </div>
+            <div class="select-wrap" id="backup-keep-wrap">
+              <button class="select-btn" id="backup-keep-btn">保留 5 份<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-keep-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint" id="backup-dir-hint">未选择备份目录</span>
+            <button class="btn-primary" id="backup-dir">📁 选择目录</button>
+            <button class="btn-primary" id="backup-now">立即备份</button>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint" id="backup-last-hint"></span>
+          </div>
+          <div class="settings-row">
             <label>当前本地数据库文件大小</label>
             <span class="set-spacer"></span>
             <span class="hint">包含数据库文件占用、时间线、报告和本地日志统计</span>

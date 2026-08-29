@@ -13,10 +13,12 @@ from pathlib import Path
 
 from dotenv import set_key
 
-from core import analyze, config, llm, summarize, todos, usage
+from core import analyze, backup, config, llm, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
+BACKUP_TASK_NAME = "DailyLogBackup"
+BACKUP_WEEKDAY_CHOICES = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 INTERVAL_CHOICES = (5, 10, 15, 30, 60)
 IDLE_CHOICES = config.IDLE_CHOICES
 RETENTION_CHOICES = config.RETENTION_CHOICES
@@ -211,6 +213,22 @@ def set_usage_enabled(enabled: bool) -> dict:
     return {"ok": True, "usage_enabled": enabled}
 
 
+# ---------- 自动备份 ----------
+
+def _backup_command() -> str:
+    return _task_command("--backup", "core/backup.py")
+
+
+def ensure_backup_task() -> None:
+    """按当前设置（幂等）注册每周备份任务计划：/sc weekly /d 周X /st 整点。"""
+    day = str(config.SETTINGS.get("backup_weekday", "SUN")).upper()
+    if day not in BACKUP_WEEKDAY_CHOICES:
+        day = "SUN"
+    hour = int(config.SETTINGS.get("backup_hour", 12))
+    _schtasks("/create", "/tn", BACKUP_TASK_NAME, "/tr", _backup_command(),
+              "/sc", "weekly", "/d", day, "/st", f"{hour:02d}:00", "/f")
+
+
 def persist_recording_choice(enabled: bool) -> None:
     """记录用户对定时记录开/停的选择（settings.json），供启动/恢复时遵守。"""
     _write_settings(recording_enabled=bool(enabled))
@@ -362,6 +380,12 @@ class Api:
             "enter_capture_interval": config.SETTINGS.get("enter_capture_interval", 15),
             "enter_interval_choices": list(config.ENTER_INTERVAL_CHOICES),
             "usage_enabled": bool(config.SETTINGS.get("usage_enabled", True)),
+            "backup_enabled": bool(config.SETTINGS.get("backup_enabled", True)),
+            "backup_dir": str(config.SETTINGS.get("backup_dir", "")),
+            "backup_weekday": str(config.SETTINGS.get("backup_weekday", "SUN")).upper(),
+            "backup_hour": int(config.SETTINGS.get("backup_hour", 12)),
+            "backup_keep": int(config.SETTINGS.get("backup_keep", 5)),
+            "backup_weekday_choices": list(BACKUP_WEEKDAY_CHOICES),
             "theme": config.SETTINGS.get("theme", "glass"),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
             "model_presets": [
@@ -605,6 +629,7 @@ class Api:
         "retention_days", "recording_enabled", "dedup_enabled",
         "enter_capture_enabled", "enter_capture_interval", "usage_enabled", "theme",
         "model_provider", "model_services",
+        "backup_enabled", "backup_dir", "backup_weekday", "backup_hour", "backup_keep",
     )
 
     def export_data(self, path: str) -> dict:
@@ -695,6 +720,66 @@ class Api:
         _logger.info("数据管理：已清除本地数据（%d 条记录、%d 份报告、日志与待办）",
                      removed["records"], removed["reports"])
         return {"ok": True, **removed}
+
+    def set_backup_settings(self, enabled: bool = None, backup_dir: str = None,
+                            weekday: str = None, hour: int = None, keep: int = None) -> dict:
+        """写备份设置并同步任务计划：开启且已选目录则注册（幂等），否则停用任务。"""
+        _logger = config.setup_logging()
+        updates = {}
+        if enabled is not None:
+            updates["backup_enabled"] = bool(enabled)
+        if backup_dir is not None:
+            updates["backup_dir"] = str(backup_dir).strip()
+        if weekday is not None:
+            weekday = str(weekday).upper()
+            if weekday not in BACKUP_WEEKDAY_CHOICES:
+                return {"ok": False, "error": f"星期必须是 {BACKUP_WEEKDAY_CHOICES} 之一"}
+            updates["backup_weekday"] = weekday
+        if hour is not None:
+            if not 0 <= int(hour) <= 23:
+                return {"ok": False, "error": "小时必须在 0-23 之间"}
+            updates["backup_hour"] = int(hour)
+        if keep is not None:
+            if not 1 <= int(keep) <= 52:
+                return {"ok": False, "error": "保留份数必须在 1-52 之间"}
+            updates["backup_keep"] = int(keep)
+        _write_settings(**updates)
+        enabled = bool(config.SETTINGS.get("backup_enabled", True))
+        has_dir = bool(str(config.SETTINGS.get("backup_dir", "")).strip())
+        try:
+            if enabled and has_dir:
+                ensure_backup_task()
+            else:
+                _set_task_enabled(False, BACKUP_TASK_NAME)
+        except RuntimeError as e:
+            _logger.error("自动备份任务计划注册失败: %s", e)
+            return {"ok": False, "error": f"任务计划注册失败: {e}"}
+        _logger.info("自动备份设置已更新: %s", updates)
+        return {"ok": True}
+
+    def run_backup_now(self) -> dict:
+        """设置页"立即备份"：同步执行打包（数据量小，秒级完成）。"""
+        return backup.run_backup()
+
+    def get_backup_info(self) -> dict:
+        """备份设置 + 上次执行结果（backup_state.json），供设置页展示。"""
+        state = {}
+        state_file = config.DATA_DIR / "backup_state.json"
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {}
+        return {
+            "ok": True,
+            "enabled": bool(config.SETTINGS.get("backup_enabled", True)),
+            "dir": str(config.SETTINGS.get("backup_dir", "")),
+            "weekday": str(config.SETTINGS.get("backup_weekday", "SUN")).upper(),
+            "hour": int(config.SETTINGS.get("backup_hour", 12)),
+            "keep": int(config.SETTINGS.get("backup_keep", 5)),
+            "weekday_choices": list(BACKUP_WEEKDAY_CHOICES),
+            "last": state,
+        }
 
     def db_stats(self) -> dict:
         """当前本地数据统计：容量 / 时间线条数 / 报告数 / 日志条数。"""
