@@ -146,6 +146,17 @@ class AppApi(ui_api.Api):
             return {"ok": False, "cancelled": True}
         return self.import_data(result[0])
 
+    def backup_dir_dialog(self) -> dict:
+        """设置页·自动备份：系统文件夹选择对话框选备份目录并保存。"""
+        try:
+            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        except Exception as e:  # noqa: BLE001
+            _logger.error("备份目录对话框失败: %s", e)
+            return {"ok": False, "error": str(e)}
+        if not result:
+            return {"ok": False, "cancelled": True}
+        return self.set_backup_settings(backup_dir=result[0])
+
     def minimize(self) -> None:
         self._window.minimize()
 
@@ -397,8 +408,19 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             _logger.error("启动恢复应用时长采样任务失败: %s", e)
 
+    def startup_backup():
+        """启动时按设置确保每周自动备份任务：开启且已选目录则创建（幂等），关闭则停用。"""
+        try:
+            if config.SETTINGS.get("backup_enabled", True) and config.SETTINGS.get("backup_dir"):
+                ui_api.ensure_backup_task()
+            else:
+                ui_api._set_task_enabled(False, ui_api.BACKUP_TASK_NAME)
+        except Exception as e:  # noqa: BLE001
+            _logger.error("启动恢复自动备份任务失败: %s", e)
+
     threading.Thread(target=startup_enable, daemon=True).start()
     threading.Thread(target=startup_usage, daemon=True).start()
+    threading.Thread(target=startup_backup, daemon=True).start()
 
     start_enter_listener()  # 回车键快速记录（全局监听，常驻）
 
@@ -448,6 +470,9 @@ if __name__ == "__main__":
     if "--usage" in sys.argv:
         from core import usage
         sys.exit(usage.main())
+    if "--backup" in sys.argv:  # 每周自动备份：任务计划调 exe --backup
+        from core import backup
+        sys.exit(backup.main())
     if "--diag" in sys.argv:  # 打包诊断：从控制台打印 get_config 与 NextRunTime 异常
         import json as _json
         import traceback as _tb

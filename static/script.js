@@ -937,6 +937,11 @@ let dedupEnabled = true;
 let enterEnabled = false;
 let currentEnterInterval = 15;
 let usageEnabled = true;
+let currentBackupWeekday = "SUN";
+let currentBackupHour = 12;
+let currentBackupKeep = 5;
+
+const BACKUP_WEEKDAY_LABELS = { MON: "周一", TUE: "周二", WED: "周三", THU: "周四", FRI: "周五", SAT: "周六", SUN: "周日" };
 
 function statusHtml(cfg) {
   const next = cfg.recording_enabled
@@ -1000,6 +1005,21 @@ async function loadSettings() {
   document.getElementById("enter-wrap").style.opacity = enterEnabled ? "1" : "0.45";
   usageEnabled = cfg.usage_enabled !== false;
   document.getElementById("usage-enabled").checked = usageEnabled;
+  currentBackupWeekday = cfg.backup_weekday || "SUN";
+  currentBackupHour = Number(cfg.backup_hour ?? 12);
+  currentBackupKeep = Number(cfg.backup_keep || 5);
+  document.getElementById("backup-enabled").checked = cfg.backup_enabled !== false;
+  setupSelect("backup-weekday-pop", "backup-weekday-btn",
+    cfg.backup_weekday_choices || ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+    (v) => BACKUP_WEEKDAY_LABELS[v],
+    (v) => { currentBackupWeekday = v; autoSave(apiCall("set_backup_settings", null, null, v), "备份时间"); }, currentBackupWeekday);
+  setupSelect("backup-hour-pop", "backup-hour-btn", [0, 2, 8, 10, 12, 14, 18, 21, 22, 23],
+    (h) => `${String(Number(h)).padStart(2, "0")}:00`,
+    (v) => { currentBackupHour = Number(v); autoSave(apiCall("set_backup_settings", null, null, null, currentBackupHour), "备份时间"); }, currentBackupHour);
+  setupSelect("backup-keep-pop", "backup-keep-btn", [1, 3, 5, 8, 12, 26, 52],
+    (k) => `保留 ${k} 份`,
+    (v) => { currentBackupKeep = Number(v); autoSave(apiCall("set_backup_settings", null, null, null, null, currentBackupKeep), "备份保留份数"); }, currentBackupKeep);
+  loadBackupInfo();
   await fillModelService(cfg);  // 回填供应商下拉与模型服务配置（Key 以星号态常驻输入框）
   updateStatus(cfg);
   loadDbStats();
@@ -1340,6 +1360,41 @@ document.getElementById("todo-add").addEventListener("click", () => {
   document.getElementById("todo-new-ok").addEventListener("click", doAdd);
   document.getElementById("todo-new-text").addEventListener("keydown", (e) => { if (e.key === "Enter") doAdd(); });
   document.getElementById("todo-new-text").focus();
+});
+
+/* ===================== 数据管理 · 自动备份 ===================== */
+
+async function loadBackupInfo() {
+  const info = await apiCall("get_backup_info");
+  if (!info || !info.ok) return;
+  document.getElementById("backup-dir-hint").textContent =
+    info.dir ? `备份目录：${info.dir}` : "未选择备份目录";
+  const last = info.last || {};
+  const el = document.getElementById("backup-last-hint");
+  if (!last.last_backup_at) { el.textContent = ""; return; }
+  el.textContent = last.last_ok
+    ? `上次备份 ${String(last.last_backup_at).replace("T", " ")}：${last.last_file}（${last.last_size_kb} KB）`
+    : `上次备份失败 ${String(last.last_backup_at).replace("T", " ")}：${last.error || "未知错误"}`;
+}
+
+document.getElementById("backup-enabled").addEventListener("change", (e) => {
+  autoSave(apiCall("set_backup_settings", e.target.checked), "自动备份");
+});
+
+document.getElementById("backup-dir").addEventListener("click", async () => {
+  const r = await apiCall("backup_dir_dialog");
+  if (!r) { toast("未连接到后端"); return; }
+  if (r.ok) { toast("已保存备份目录"); loadBackupInfo(); }
+  else if (!r.cancelled) toast(r.error || "选择目录失败");
+});
+
+document.getElementById("backup-now").addEventListener("click", async () => {
+  toast("正在打包备份…", 0);  // 持久显示，完成后替换
+  const r = await apiCall("run_backup_now");
+  if (!r) { toast("未连接到后端"); return; }
+  if (r.ok) toast(`已备份到 ${r.path}（${r.size_kb} KB）`);
+  else toast(r.error || "备份失败");
+  loadBackupInfo();
 });
 
 /* ===================== 数据管理 ===================== */

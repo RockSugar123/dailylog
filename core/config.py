@@ -229,6 +229,13 @@ USAGE_DIR = RECORDS_DIR / "usage"
 USAGE_INTERVAL_MINUTES = 2  # 采样间隔（分钟），时长按 采样次数 × 间隔 估算
 USAGE_ENABLED = SETTINGS.get("usage_enabled", True)  # 设置页可开关
 
+# 自动备份（任务计划 DailyLogBackup 每周驱动一次，core/backup.py 打包 data/）
+BACKUP_ENABLED = SETTINGS.get("backup_enabled", True)   # 设置页可开关
+BACKUP_DIR = str(SETTINGS.get("backup_dir", ""))        # zip 输出目录，空 = 未启用
+BACKUP_WEEKDAY = str(SETTINGS.get("backup_weekday", "SUN"))  # schtasks /d 值：MON..SUN
+BACKUP_HOUR = int(SETTINGS.get("backup_hour", 12))      # 触发时刻（整点，24 小时制）
+BACKUP_KEEP = int(SETTINGS.get("backup_keep", 5))       # 保留最近 N 份
+
 # WebView2 数据目录固定到用户数据区（pywebview 默认每次启动建随机临时目录且不清理，见 winforms.init_storage）
 WEBVIEW_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "dailylog" / "webview"
 

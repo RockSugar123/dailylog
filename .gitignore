@@ -25,3 +25,10 @@ __pycache__/
 
 # app.py 每次启动生成的缓存穿透页面（由 index.html 派生，勿编辑勿提交）
 static/index_cachebust.html
+
+# 自动备份包（用户选择把备份目录指到仓库内时，不进版本库）
+dailylog-backup-*.zip
+
+# 本地协作/密钥文件，不进仓库
+AGENTS.md
+.env
