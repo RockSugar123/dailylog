@@ -1,4 +1,4 @@
-"""dailylog 入口：把 data/ 打包 zip 到备份目录，并清理超出保留份数的旧备份。
+"""dailylog 入口：把 data/（不含 .env / API Key）打包 zip 到备份目录，并清理超出保留份数的旧备份。
 
 由 Windows 任务计划程序每周调用一次（pythonw 运行，无控制台）；
 设置页"立即备份"也直接调 run_backup()。
@@ -22,13 +22,15 @@ _logger = config.setup_logging()
 STATE_FILE = config.DATA_DIR / "backup_state.json"
 ZIP_PREFIX = "dailylog-backup-"
 
-# 不进备份：截图（分析完即删，只剩孤儿文件，可再生）、日志（可再生）、备份状态自身
+# 不进备份：.env（明文 API Key，绝不入包）、截图（分析完即删，只剩孤儿文件，可再生）、
+# 日志（可再生）、备份状态自身
 EXCLUDE_DIRS = {"screenshots", "__pycache__"}
+EXCLUDE_FILES = {".env"}
 EXCLUDE_PREFIXES = ("dailylog.log", ZIP_PREFIX)
 
 
 def run_backup() -> dict:
-    """打包 data/ 到 settings.json 的 backup_dir，保留最近 backup_keep 份。"""
+    """打包 data/（不含 .env）到 settings.json 的 backup_dir，保留最近 backup_keep 份。"""
     dest_raw = str(config.SETTINGS.get("backup_dir", "")).strip()
     if not dest_raw:
         _logger.warning("自动备份：未设置备份目录，跳过")
@@ -68,6 +70,8 @@ def _collect_files() -> list:
         if not p.is_file() or p == STATE_FILE:
             continue
         if any(part in EXCLUDE_DIRS for part in p.relative_to(config.DATA_DIR).parts[:-1]):
+            continue
+        if p.name in EXCLUDE_FILES:
             continue
         if p.name.startswith(EXCLUDE_PREFIXES):
             continue

@@ -256,7 +256,8 @@ def generate_report(day: str = None, week: str = None) -> tuple:
             app_usage=build_app_usage(days),
         )
         if config.REPORT_NAME:
-            config_msg = config_msg.replace("{{姓名}}", config.REPORT_NAME)
+            # 模板经 .format() 后 {{姓名}} 已转为 {姓名}，必须按单花括号替换
+            config_msg = config_msg.replace("{姓名}", config.REPORT_NAME)
         else:
             config_msg = "\n".join(line for line in config_msg.splitlines() if "{姓名}" not in line)
         call_messages([{"role": "user", "content": config_msg}], max_tokens=64)  # 第一步：只回"收到"

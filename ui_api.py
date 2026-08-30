@@ -3,6 +3,7 @@
 纯 Python，不依赖 pywebview，便于无 GUI 直测。返回结构均为 JSON 友好的 dict/list。
 """
 import json
+import logging
 import os
 import re
 import subprocess
@@ -756,26 +757,41 @@ class Api:
         return {"ok": True, **restored}
 
     def clear_data(self) -> dict:
-        """清除历史数据：records/、reports/、截图、日志、待办；保留 .env 与 settings.json。"""
+        """清除历史数据：records/、reports/、截图、日志、待办；保留 .env 与 settings.json。
+
+        逐文件容错：单个文件删除失败（如被占用）不中断其余清理，最后汇总报错。
+        活跃日志被本进程的 handler 锁住（Windows 不能删打开中的文件），先摘 handler
+        释放句柄，删完在 finally 里重建，保证后续日志继续落盘。
+        """
         _logger = config.setup_logging()
         removed = {"records": 0, "reports": 0}
+        errors = []
+
+        def _unlink(paths, counter: str = "") -> None:
+            for p in paths:
+                try:
+                    p.unlink(missing_ok=True)
+                    if counter:
+                        removed[counter] += 1
+                except OSError as e:
+                    errors.append(f"{p.name}: {e}")
+
+        _unlink(list(config.RAW_DIR.glob("*.jsonl")) + list(config.RECORDS_DIR.glob("*.md")), "records")
+        _unlink(list(config.REPORTS_DIR.glob("*.md")), "reports")
+        _unlink(list(config.USAGE_DIR.glob("*.jsonl")))      # 应用使用时长数据一并清除
+        _unlink(list(config.SCREENSHOTS_DIR.glob("*.png")))  # 孤儿截图一并清除
+        logger = logging.getLogger("dailylog")
+        for h in logger.handlers[:]:
+            h.close()
+            logger.removeHandler(h)
         try:
-            for p in list(config.RAW_DIR.glob("*.jsonl")) + list(config.RECORDS_DIR.glob("*.md")):
-                p.unlink(missing_ok=True)
-                removed["records"] += 1
-            for p in config.REPORTS_DIR.glob("*.md"):
-                p.unlink(missing_ok=True)
-                removed["reports"] += 1
-            for p in config.USAGE_DIR.glob("*.jsonl"):  # 应用使用时长数据一并清除
-                p.unlink(missing_ok=True)
-            for p in config.SCREENSHOTS_DIR.glob("*.png"):  # 孤儿截图一并清除
-                p.unlink(missing_ok=True)
-            for p in config.DATA_DIR.glob("dailylog.log*"):
-                p.unlink(missing_ok=True)
-            config.TODOS_FILE.unlink(missing_ok=True)
-            config.STATE_FILE.unlink(missing_ok=True)
-        except OSError as e:
-            return {"ok": False, "error": str(e)}
+            _unlink(list(config.DATA_DIR.glob("dailylog.log*")))
+        finally:
+            config.setup_logging()  # handlers 已摘空，这里会重建；调用幂等
+        _unlink([config.TODOS_FILE, config.STATE_FILE])
+        if errors:
+            _logger.warning("数据清除部分失败: %s", "；".join(errors))
+            return {"ok": False, "error": "；".join(errors)}
         _logger.info("数据管理：已清除本地数据（%d 条记录、%d 份报告、日志与待办）",
                      removed["records"], removed["reports"])
         return {"ok": True, **removed}
