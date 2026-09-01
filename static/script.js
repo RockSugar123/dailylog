@@ -578,7 +578,21 @@ let rangeEnd = todayStr();
 let timelineRecords = [];
 let lastTimelineSig = "";
 
+function isValidTimelineDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T12:00:00`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function normalizedTimelineRange(start, end) {
+  const fallback = todayStr();
+  const safeStart = isValidTimelineDate(start) ? start : fallback;
+  const safeEnd = isValidTimelineDate(end) ? end : fallback;
+  return safeStart <= safeEnd ? [safeStart, safeEnd] : [safeEnd, safeStart];
+}
+
 function applyRange(start, end) {
+  [start, end] = normalizedTimelineRange(start, end);
   rangeStart = start;
   rangeEnd = end;
   document.getElementById("range-start").value = start;
@@ -1658,3 +1672,122 @@ document.getElementById("home-capture").addEventListener("click", startManualCap
 applyRange(todayStr(), todayStr());
 bindWindowDrag();
 bindResizeGrip();
+
+/* ===================== 数据看板 ===================== */
+
+const DASHBOARD_WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+let dashboardTrendRange = "30";
+let dashboardRequestId = 0;
+
+async function loadUsageDashboard() {
+  if (document.getElementById("page-usage").hidden) return;
+  const requestId = ++dashboardRequestId;
+  const r = await apiCall("get_usage_dashboard", usageScope, usageDate, dashboardTrendRange);
+  if (requestId !== dashboardRequestId || !r || !r.ok) return;
+  renderUsageTrend(r.trend);
+  renderUsageHeatmap(r.heatmap);
+}
+
+function renderUsageTrend(points) {
+  const box = document.getElementById("usage-trend-chart");
+  if (!points.length) { box.innerHTML = '<div class="tl-empty">暂无趋势数据</div>'; return; }
+  const width = 760, height = 220, left = 22, top = 14, right = 12, bottom = 26;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const maxMinutes = Math.max(...points.map((point) => point.minutes), 1);
+  const xFor = (index) => left + (points.length === 1 ? plotWidth / 2 : index * plotWidth / (points.length - 1));
+  const yFor = (minutes) => top + plotHeight - minutes / maxMinutes * plotHeight;
+  const line = points.map((point, index) => `${index ? "L" : "M"}${xFor(index).toFixed(1)},${yFor(point.minutes).toFixed(1)}`).join(" ");
+  const area = `${line} L${xFor(points.length - 1).toFixed(1)},${top + plotHeight} L${xFor(0).toFixed(1)},${top + plotHeight} Z`;
+  const labels = points.filter((_, index) => index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2));
+  box.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每日总使用时长趋势">
+      <line class="trend-grid" x1="${left}" y1="${top}" x2="${width - right}" y2="${top}"></line>
+      <line class="trend-grid" x1="${left}" y1="${top + plotHeight / 2}" x2="${width - right}" y2="${top + plotHeight / 2}"></line>
+      <line class="trend-grid" x1="${left}" y1="${top + plotHeight}" x2="${width - right}" y2="${top + plotHeight}"></line>
+      <path class="trend-area" d="${area}"></path>
+      <path class="trend-line" d="${line}"></path>
+      ${points.map((point, index) => {
+        const title = point.sampled ? `${point.date} · ${fmtMin(point.minutes)}` : `${point.date} · 无采样数据`;
+        return `<circle class="${point.sampled ? "trend-point" : "trend-empty"}" cx="${xFor(index)}" cy="${yFor(point.minutes)}" r="${point.sampled ? 3.5 : 2.5}"><title>${escapeHtml(title)}</title></circle>`;
+      }).join("")}
+      ${labels.map((point) => {
+        const index = points.indexOf(point);
+        return `<text class="trend-label" text-anchor="middle" x="${xFor(index)}" y="${height - 7}">${point.date.slice(5)}</text>`;
+      }).join("")}
+      <text class="trend-label" x="${left}" y="${top - 3}">${fmtMin(maxMinutes)}</text>
+    </svg>`;
+}
+
+function renderUsageHeatmap(rows) {
+  const box = document.getElementById("usage-heatmap");
+  const maximum = Math.max(...rows.flatMap((row) => row.hours.map((cell) => cell.minutes)), 1);
+  let html = '<div class="usage-heatmap"><span></span>';
+  for (let hour = 0; hour < 24; hour += 1) html += `<span class="heatmap-hour">${String(hour).padStart(2, "0")}</span>`;
+  rows.forEach((row) => {
+    html += `<span class="heatmap-day">${DASHBOARD_WEEKDAYS[row.weekday]}</span>`;
+    row.hours.forEach((cell, hour) => {
+      const ratio = cell.sampled ? Math.round((0.16 + cell.minutes / maximum * 0.78) * 100) : 0;
+      const title = cell.sampled
+        ? `${DASHBOARD_WEEKDAYS[row.weekday]} ${String(hour).padStart(2, "0")}:00 · ${fmtMin(cell.minutes)}`
+        : `${DASHBOARD_WEEKDAYS[row.weekday]} ${String(hour).padStart(2, "0")}:00 · 无采样数据`;
+      html += `<button type="button" class="heatmap-cell${cell.sampled ? " sampled" : ""}" style="background-color:color-mix(in srgb, var(--brand) ${ratio}%, var(--panel));" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}"></button>`;
+    });
+  });
+  box.innerHTML = `${html}</div>`;
+}
+
+document.querySelectorAll(".dashboard-tab").forEach((button) => {
+  button.addEventListener("click", () => {
+    dashboardTrendRange = button.dataset.range;
+    document.querySelectorAll(".dashboard-tab").forEach((item) => item.classList.toggle("active", item === button));
+    loadUsageDashboard();
+  });
+});
+document.querySelectorAll(".scope-btn, #usage-date, #usage-today").forEach((item) => {
+  item.addEventListener("click", () => setTimeout(loadUsageDashboard, 0));
+  item.addEventListener("change", () => setTimeout(loadUsageDashboard, 0));
+});
+new MutationObserver(() => loadUsageDashboard()).observe(document.getElementById("page-usage"), {
+  attributes: true,
+  attributeFilter: ["hidden"],
+});
+
+/* ===================== 报告导出 ===================== */
+
+function reportExportFileName() {
+  const title = document.getElementById("modal-title").textContent.trim();
+  if (title.endsWith(".md")) return title;
+  const footer = document.getElementById("modal-foot").textContent;
+  return footer.match(/([^\\/]+\.md)\s*$/)?.[1] || "";
+}
+
+function addReportExportActions() {
+  const modalBody = document.getElementById("modal-body");
+  const modalFoot = document.getElementById("modal-foot");
+  if (!modalBody.querySelector(".md-body") || modalFoot.querySelector(".report-export-actions")) return;
+  const name = reportExportFileName();
+  if (!name) return;
+  modalFoot.hidden = false;
+  modalFoot.insertAdjacentHTML("beforeend", `
+    <div class="report-export-actions" data-report-name="${escapeHtml(name)}">
+      <button type="button" class="btn-ghost" data-report-export="text">复制邮件正文</button>
+      <button type="button" class="btn-ghost" data-report-export="html">复制富文本</button>
+      <button type="button" class="btn-primary" data-report-export="pdf">导出 PDF</button>
+    </div>`);
+}
+
+document.getElementById("modal").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-report-export]");
+  if (!button) return;
+  const name = button.closest(".report-export-actions")?.dataset.reportName;
+  if (!name) return;
+  const format = button.dataset.reportExport;
+  const r = format === "pdf"
+    ? await apiCall("export_report_pdf_dialog", name)
+    : await apiCall("copy_report", name, format);
+  if (r?.cancelled) return;
+  toast(r?.ok ? (format === "pdf" ? "PDF 已导出" : "已复制到剪贴板") : (r?.error || "操作失败"));
+});
+new MutationObserver(addReportExportActions).observe(document.getElementById("modal-body"), { childList: true, subtree: true });
+new MutationObserver(addReportExportActions).observe(document.getElementById("modal-foot"), { childList: true, subtree: true });
+new MutationObserver(addReportExportActions).observe(document.getElementById("modal-title"), { childList: true });

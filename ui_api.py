@@ -119,6 +119,15 @@ def task_is_enabled(name: str = TASK_NAME) -> bool:
         return False  # 任务不存在/查询失败
 
 
+def task_exists(name: str = TASK_NAME) -> bool:
+    """任务计划是否存在；供启用时决定是否需要先注册。"""
+    try:
+        _schtasks("/query", "/tn", name)
+        return True
+    except RuntimeError:
+        return False
+
+
 def apply_interval(minutes: int) -> None:
     """写入 settings.json 并以新间隔重建任务计划（含启用）。"""
     if minutes not in INTERVAL_CHOICES:
@@ -268,6 +277,12 @@ class Api:
 
     def get_records_range(self, start: str, end: str) -> list:
         """日期范围（含首尾）内的全部时间线条目，按时间升序。"""
+        try:
+            datetime.strptime(start, "%Y-%m-%d")
+            datetime.strptime(end, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            config.setup_logging().warning("忽略非法时间线日期范围: %r 到 %r", start, end)
+            return []
         start_d = datetime.strptime(start, "%Y-%m-%d")
         end_d = datetime.strptime(end, "%Y-%m-%d")
         records = []
@@ -300,6 +315,15 @@ class Api:
         stats.update({"ok": True, "scope": scope, "start": start.isoformat(), "end": end.isoformat(),
                       "days": (end - start).days + 1})
         return stats
+
+    def get_usage_dashboard(self, scope: str, date: str = "", trend_range: str = "30") -> dict:
+        """趋势曲线与活跃热力图的数据。"""
+        from core import analytics  # noqa: PLC0415
+        try:
+            anchor = date or datetime.now().strftime("%Y-%m-%d")
+            return analytics.usage_dashboard(scope, anchor, trend_range)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
 
     # ---------- 报告 ----------
 
@@ -658,8 +682,18 @@ class Api:
             disable_task()
             enabled = False
         else:
+            try:
+                if not task_exists():
+                    apply_interval(int(config.SETTINGS.get("interval_minutes", 10)))
+            except (ValueError, RuntimeError) as e:
+                _logger.error("创建定时记录任务失败: %s", e)
+                return {"ok": False, "error": f"无法创建定时记录任务: {e}"}
             enable_task()
             enabled = True
+        if task_is_enabled() != enabled:
+            action = "启用" if enabled else "停用"
+            _logger.error("定时记录任务%s后状态未生效", action)
+            return {"ok": False, "error": f"定时记录{action}失败，请查看任务计划程序"}
         persist_recording_choice(enabled)
         return {"ok": True, "recording_enabled": enabled}
 
@@ -859,6 +893,10 @@ class Api:
         _write_settings(**updates)
         enabled = bool(config.SETTINGS.get("backup_enabled", True))
         has_dir = bool(str(config.SETTINGS.get("backup_dir", "")).strip())
+        if not (enabled and has_dir) and not task_exists(BACKUP_TASK_NAME):
+            _logger.info("自动备份任务不存在，无需停用")
+            _logger.info("自动备份设置已更新: %s", updates)
+            return {"ok": True}
         try:
             if enabled and has_dir:
                 ensure_backup_task()

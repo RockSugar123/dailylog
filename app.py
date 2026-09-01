@@ -157,6 +157,50 @@ class AppApi(ui_api.Api):
             return {"ok": False, "cancelled": True}
         return self.set_backup_settings(backup_dir=result[0])
 
+    def copy_report(self, name: str, export_format: str) -> dict:
+        """把报告复制为邮件纯文本或 Windows 富文本。"""
+        from core import report_export  # noqa: PLC0415
+        report = self.get_report(name)
+        if not report.get("ok"):
+            return report
+        if export_format not in {"text", "html"}:
+            return {"ok": False, "error": "不支持的复制格式"}
+        try:
+            plain_text = report_export.email_text(report["content"])
+            rich_text = report_export.rich_html(report["content"])
+            _copy_report_to_clipboard(plain_text, rich_text if export_format == "html" else None)
+        except RuntimeError as exc:
+            _logger.error("复制报告失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "format": export_format}
+
+    def export_report_pdf_dialog(self, name: str) -> dict:
+        """用原生另存为对话框导出报告 PDF。"""
+        from core import report_export  # noqa: PLC0415
+        report = self.get_report(name)
+        if not report.get("ok"):
+            return report
+        try:
+            result = self._window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=f"{Path(name).stem}.pdf",
+                file_types=("PDF 文件 (*.pdf)",),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _logger.error("PDF 导出对话框失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        if not result:
+            return {"ok": False, "cancelled": True}
+        destination = Path(result[0])
+        if destination.suffix.lower() != ".pdf":
+            destination = destination.with_suffix(".pdf")
+        try:
+            report_export.write_pdf(report["content"], destination)
+        except RuntimeError as exc:
+            _logger.error("PDF 导出失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "path": str(destination)}
+
     def minimize(self) -> None:
         self._window.minimize()
 
@@ -411,6 +455,10 @@ def main() -> None:
     def startup_backup():
         """启动时按设置确保每周自动备份任务：开启且已选目录则创建（幂等），关闭则停用。"""
         try:
+            backup_is_configured = config.SETTINGS.get("backup_enabled", True) and config.SETTINGS.get("backup_dir")
+            if not backup_is_configured and not ui_api.task_exists(ui_api.BACKUP_TASK_NAME):
+                _logger.info("自动备份任务不存在，无需在启动时停用")
+                return
             if config.SETTINGS.get("backup_enabled", True) and config.SETTINGS.get("backup_dir"):
                 ui_api.ensure_backup_task()
             else:
@@ -461,6 +509,69 @@ def main() -> None:
         reopen.wait()
 
     _logger.info("主循环退出")
+
+
+def _copy_report_to_clipboard(plain_text: str, rich_html: str | None) -> None:
+    """同时写入 Unicode 文本与 Windows HTML Clipboard Format。"""
+    try:
+        import win32clipboard
+    except ImportError as exc:
+        raise RuntimeError("缺少 Windows 剪贴板组件") from exc
+
+    if rich_html is None:
+        _write_text_clipboard(win32clipboard, plain_text)
+        return
+
+    start_marker = "<!--StartFragment-->"
+    end_marker = "<!--EndFragment-->"
+    document = f"<html><body>{start_marker}{rich_html}{end_marker}</body></html>"
+    header_template = (
+        "Version:0.9\r\n"
+        "StartHTML:{start_html:010d}\r\n"
+        "EndHTML:{end_html:010d}\r\n"
+        "StartFragment:{start_fragment:010d}\r\n"
+        "EndFragment:{end_fragment:010d}\r\n"
+    )
+    blank_header = header_template.format(start_html=0, end_html=0, start_fragment=0, end_fragment=0)
+    start_html = len(blank_header.encode("utf-8"))
+    document_bytes = document.encode("utf-8")
+    marker_start_bytes = start_marker.encode("utf-8")
+    marker_end_bytes = end_marker.encode("utf-8")
+    fragment_start = start_html + document_bytes.index(marker_start_bytes) + len(marker_start_bytes)
+    fragment_end = start_html + document_bytes.index(marker_end_bytes)
+    header = header_template.format(
+        start_html=start_html,
+        end_html=start_html + len(document_bytes),
+        start_fragment=fragment_start,
+        end_fragment=fragment_end,
+    )
+    html_format = win32clipboard.RegisterClipboardFormat("HTML Format")
+    try:
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, plain_text)
+        win32clipboard.SetClipboardData(html_format, header.encode("utf-8") + document_bytes)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("无法写入 Windows 剪贴板") from exc
+    finally:
+        try:
+            win32clipboard.CloseClipboard()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _write_text_clipboard(win32clipboard, plain_text: str) -> None:
+    try:
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, plain_text)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("无法写入 Windows 剪贴板") from exc
+    finally:
+        try:
+            win32clipboard.CloseClipboard()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":

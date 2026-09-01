@@ -199,6 +199,25 @@
           <div class="panel-head">时段分布 <span class="hint" id="usage-bucket-label">按小时统计使用强度</span></div>
           <div class="cat-list" id="usage-buckets"></div>
         </div>
+
+        <div class="panel dashboard-panel">
+          <div class="panel-head dashboard-head">
+            使用趋势 <span class="hint">每日总使用时长（采样估算）</span>
+            <span class="set-spacer"></span>
+            <div class="dashboard-tabs" id="usage-trend-tabs">
+              <button type="button" class="btn-ghost dashboard-tab" data-range="7">7 天</button>
+              <button type="button" class="btn-ghost dashboard-tab active" data-range="30">30 天</button>
+              <button type="button" class="btn-ghost dashboard-tab" data-range="90">90 天</button>
+              <button type="button" class="btn-ghost dashboard-tab" data-range="current">当前范围</button>
+            </div>
+          </div>
+          <div class="usage-trend" id="usage-trend-chart"></div>
+        </div>
+
+        <div class="panel dashboard-panel">
+          <div class="panel-head">活跃热力图 <span class="hint">星期 × 小时；灰色表示无采样数据</span></div>
+          <div class="heatmap-scroll" id="usage-heatmap"></div>
+        </div>
       </section>
 
       <!-- ===== 待办页 ===== -->

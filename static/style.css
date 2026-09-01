@@ -1662,3 +1662,26 @@ body.theme-abyss .fx-blobs { --blob-a: rgba(76, 195, 255, 0.14); --blob-b: rgba(
 body.theme-film .fx-blobs { --blob-a: rgba(255, 160, 46, 0.11); --blob-b: rgba(255, 90, 40, 0.09) }
 body.theme-mint .fx-blobs { --blob-a: rgba(23, 199, 143, 0.15); --blob-b: rgba(14, 165, 207, 0.13) }
 body.theme-sakura .fx-blobs { --blob-a: rgba(255, 163, 185, 0.22); --blob-b: rgba(255, 214, 224, 0.26) }
+
+/* ===== 数据看板 ===== */
+.dashboard-panel { overflow: hidden }
+.dashboard-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
+.dashboard-head .set-spacer { flex: 1 }
+.dashboard-tabs, .report-export-actions { display: inline-flex; gap: 6px; flex-wrap: wrap }
+.usage-trend { min-height: 190px }
+.usage-trend svg { width: 100%; height: 220px; overflow: visible }
+.usage-trend .trend-grid { stroke: var(--panel-border); stroke-width: 1 }
+.usage-trend .trend-line { fill: none; stroke: var(--brand); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round }
+.usage-trend .trend-area { fill: var(--brand-soft) }
+.usage-trend .trend-point { fill: var(--brand); stroke: var(--bg-deep); stroke-width: 2 }
+.usage-trend .trend-empty { fill: var(--faint); opacity: 0.55 }
+.trend-label { fill: var(--faint); font-size: 11px }
+.heatmap-scroll { overflow-x: auto; padding-bottom: 2px }
+.usage-heatmap { display: grid; grid-template-columns: 38px repeat(24, minmax(20px, 1fr)); gap: 4px; min-width: 680px }
+.heatmap-hour, .heatmap-day { color: var(--faint); font-size: 10px; text-align: center }
+.heatmap-day { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px }
+.heatmap-cell { aspect-ratio: 1; min-height: 20px; padding: 0; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--panel); cursor: default }
+.heatmap-cell.sampled { border-color: color-mix(in srgb, var(--brand) 25%, var(--panel-border)) }
+.heatmap-cell:hover { outline: 2px solid var(--brand); outline-offset: 1px }
+.report-export-actions { width: 100%; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border) }
+.report-export-actions .btn-ghost { flex: 1 }
