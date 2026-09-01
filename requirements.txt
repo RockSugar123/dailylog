@@ -6,3 +6,4 @@ pywin32
 pystray
 pillow
 pynput
+reportlab
