@@ -899,7 +899,13 @@ async function generateReport(kind, date = "") {
   if (!r) { toast("未连接到后端"); return; }
   if (!r.ok) { toast(r.error); return; }
   const title = kind === "week" ? "本周周报" : (date ? `${date} 日报` : "今日日报");
-  openModal(title, `<div class="md-body">${mdToHtml(r.content)}</div>`, `保存位置：${escapeHtml(r.path)}`);
+  const genName = (r.path || "").split(/[\\/]/).pop();
+  openModal(title, `<div class="md-body">${mdToHtml(r.content)}</div>`,
+    `保存位置：${escapeHtml(r.path)} <button class="btn-ghost" id="modal-edit-btn" style="margin-left:10px">✎ 编辑</button>`);
+  document.getElementById("modal-edit-btn").addEventListener("click", () => {
+    closeModal();
+    if (genName) openReportEditor(genName);
+  });
   loadReports();
   if (!document.getElementById("page-home").hidden) loadHome();  // 总览页的最新报告卡跟随刷新
 }
@@ -917,15 +923,152 @@ async function loadReports() {
     <div class="report-item" data-name="${escapeHtml(x.name)}">
       <span class="report-name">${escapeHtml(x.name)}</span>
       <span class="report-mtime">${escapeHtml(x.mtime)}</span>
+      <button class="report-edit-btn" title="编辑">✎</button>
     </div>`).join("");
   list.querySelectorAll(".report-item").forEach((el) => {
     el.addEventListener("click", async () => {
       const r = await apiCall("get_report", el.dataset.name);
-      if (r && r.ok) openModal(r.name, `<div class="md-body">${mdToHtml(r.content)}</div>`);
+      if (r && r.ok) {
+        openModal(r.name, `<div class="md-body">${mdToHtml(r.content)}</div>`,
+          `<button class="btn-ghost" id="modal-edit-btn">✎ 编辑</button>`);
+        document.getElementById("modal-edit-btn").addEventListener("click", () => {
+          closeModal();
+          openReportEditor(r.name);
+        });
+      }
       else toast((r && r.error) || "读取失败");
+    });
+    el.querySelector(".report-edit-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openReportEditor(el.dataset.name);
     });
   });
 }
+
+/* ===================== 日报编辑工作台 ===================== */
+
+let edName = "";        // 当前编辑的报告文件名
+let edBaseMtime = 0;    // 打开/保存成功时的磁盘 mtime，用于覆盖冲突检测
+let edDirty = false;    // 脏状态：有未保存修改
+
+const edText = document.getElementById("ed-text");
+const edPreview = document.getElementById("ed-preview");
+
+function edSetDirty(d) {
+  edDirty = d;
+  document.getElementById("ed-dirty").hidden = !d;
+}
+
+function edRenderPreview() { edPreview.innerHTML = mdToHtml(edText.value); }
+
+async function openReportEditor(name) {
+  const r = await apiCall("get_report", name);
+  if (!r || !r.ok) { toast((r && r.error) || "读取失败"); return; }
+  edName = r.name;
+  edBaseMtime = r.mtime || 0;
+  edText.value = r.content;
+  edRenderPreview();
+  edSetDirty(false);
+  document.getElementById("ed-name").textContent = r.name;
+  document.getElementById("report-editor").hidden = false;
+  document.getElementById("report-list-panel").hidden = true;
+  document.querySelector("#page-reports .report-actions").hidden = true;
+}
+
+function closeReportEditor(force = false) {
+  if (!force && edDirty && !confirm("有未保存的修改，确定放弃并返回列表？")) return;
+  edSetDirty(false);
+  document.getElementById("report-editor").hidden = true;
+  document.getElementById("report-list-panel").hidden = false;
+  document.querySelector("#page-reports .report-actions").hidden = false;
+  loadReports();
+}
+
+edText.addEventListener("input", () => { edSetDirty(true); edRenderPreview(); });
+
+/* Ctrl/Cmd+S 快捷保存（仅工作台可见时接管） */
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" &&
+      !document.getElementById("report-editor").hidden) {
+    e.preventDefault();
+    saveReportEdits(false);
+  }
+});
+
+async function saveReportEdits(saveAs) {
+  const content = edText.value;
+  if (!content.trim()) { toast("正文为空，未保存"); return; }
+  let name = edName, base = edBaseMtime;
+  if (saveAs) {
+    const input = prompt("另存为文件名（.md 结尾）：", name.replace(/\.md$/, "") + "-副本.md");
+    if (input === null) return;
+    name = input.trim();
+    if (!/^[^\s\\/:*?"<>|]+\.md$/.test(name)) { toast("文件名不合法：仅限中英文、数字、-、_，且以 .md 结尾"); return; }
+    if (name === edName) { toast("与当前文件同名，请直接保存"); return; }
+    const items = (await apiCall("list_reports")) || [];
+    if (items.some((x) => x.name === name) && !confirm(`${name} 已存在，覆盖它？`)) return;
+    base = 0;  // 另存为不做 mtime 冲突检测（存在性已确认）
+  } else if (!confirm(`确定覆盖保存 ${name}？`)) return;
+  const r = await apiCall("save_report", name, content, base);
+  if (!r) { toast("未连接到后端"); return; }
+  if (!r.ok && r.conflict) {
+    // 编辑期间文件被外部改动：用户确认后强制覆盖
+    if (!confirm("文件在编辑期间被外部修改，仍要覆盖吗？")) return;
+    const r2 = await apiCall("save_report", name, content, 0);
+    if (!r2 || !r2.ok) { toast((r2 && r2.error) || "保存失败"); return; }
+    Object.assign(r, r2);
+  }
+  if (!r.ok) { toast(r.error); return; }
+  edName = r.name;
+  edBaseMtime = r.mtime || 0;
+  document.getElementById("ed-name").textContent = r.name;
+  edSetDirty(false);
+  toast(`已保存 ${r.name}`);
+}
+
+/* 从文件名推断重新生成参数：日报-YYYY-MM-DD.md / 周报-YYYY-Www.md */
+function regenTarget(name) {
+  let m = name.match(/^日报-(\d{4}-\d{2}-\d{2})\.md$/);
+  if (m) return { kind: "day", date: m[1] };
+  m = name.match(/^周报-(\d{4})-W(\d{1,2})\.md$/);
+  if (m) {
+    // ISO 周 → 该周周一（1月4日必在第1周）
+    const jan4 = new Date(Date.UTC(+m[1], 0, 4));
+    const monday = new Date(jan4);
+    monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() + 6) % 7) + (+m[2] - 1) * 7);
+    return { kind: "week", date: monday.toISOString().slice(0, 10) };
+  }
+  return null;
+}
+
+document.getElementById("ed-back").addEventListener("click", () => closeReportEditor());
+document.getElementById("ed-save").addEventListener("click", () => saveReportEdits(false));
+document.getElementById("ed-saveas").addEventListener("click", () => saveReportEdits(true));
+document.getElementById("ed-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(edText.value); toast("Markdown 已复制"); }
+  catch { toast("复制失败，请手动全选复制"); }
+});
+document.getElementById("ed-opendir").addEventListener("click", async () => {
+  const r = await apiCall("open_report_dir", edName);
+  if (r && !r.ok) toast(r.error);
+});
+document.getElementById("ed-regen").addEventListener("click", async () => {
+  const t = regenTarget(edName);
+  if (!t) { toast("无法从文件名推断日期，暂不支持重新生成"); return; }
+  if (edDirty && !confirm("当前有未保存的修改，重新生成将丢弃它们，继续？")) return;
+  if (!confirm(`将重新生成 ${t.date} 的${t.kind === "week" ? "周报" : "日报"}并覆盖磁盘文件，继续？`)) return;
+  toast("正在重新生成…");
+  const r = await apiCall("generate_report", t.kind, t.date);
+  if (!r) { toast("未连接到后端"); return; }
+  if (!r.ok) { toast(r.error); return; }
+  // 回填编辑器，并以磁盘新 mtime 为基线
+  edText.value = r.content;
+  edRenderPreview();
+  const fresh = await apiCall("get_report", edName);
+  edBaseMtime = (fresh && fresh.ok && fresh.mtime) || 0;
+  edSetDirty(false);
+  toast("已重新生成并回填");
+});
 
 /* ===================== 设置页 ===================== */
 

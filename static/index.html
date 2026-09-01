@@ -236,9 +236,28 @@
           <button class="btn-ghost" id="gen-day-pick">↗ 生成该日日报</button>
         </div>
 
-        <div class="panel">
+        <div class="panel" id="report-list-panel">
           <div class="panel-head">历史报告 <span class="hint" id="report-count"></span></div>
           <div class="report-list" id="report-list"></div>
+        </div>
+
+        <!-- 编辑工作台：左右分栏，左 Markdown 编辑 / 右实时预览 -->
+        <div class="editor" id="report-editor" hidden>
+          <div class="editor-bar">
+            <button class="btn-ghost" id="ed-back">← 返回列表</button>
+            <span class="editor-name" id="ed-name"></span>
+            <span class="editor-dirty" id="ed-dirty" hidden>● 未保存</span>
+            <span class="report-actions-sep"></span>
+            <button class="btn-primary" id="ed-save">保存(覆盖)</button>
+            <button class="btn-ghost" id="ed-saveas">另存为</button>
+            <button class="btn-ghost" id="ed-regen">↻ 重新生成(该日)</button>
+            <button class="btn-ghost" id="ed-copy">复制Markdown</button>
+            <button class="btn-ghost" id="ed-opendir">打开所在目录</button>
+          </div>
+          <div class="editor-panes">
+            <textarea id="ed-text" spellcheck="false" placeholder="在这里编辑 Markdown…"></textarea>
+            <div class="md-body editor-preview" id="ed-preview"></div>
+          </div>
         </div>
       </section>
 

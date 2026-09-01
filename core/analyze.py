@@ -134,5 +134,6 @@ def call_analyze(image_url: str, existing_todos: list = None, foreground: str = 
         top_p=config.ANALYZE_TOP_P,
         max_tokens=config.ANALYZE_MAX_TOKENS,
         stream=False,
+        thinking={"type": "enabled" if config.ANALYZE_THINKING else "disabled"},
     )
     return normalize(parse_json(content))
