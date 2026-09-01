@@ -3,6 +3,8 @@
 纯 Python，不依赖 pywebview，便于无 GUI 直测。返回结构均为 JSON 友好的 dict/list。
 """
 import json
+import logging
+import os
 import re
 import subprocess
 import sys
@@ -10,10 +12,14 @@ from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
 
-from core import analyze, config, summarize, todos, usage
+from dotenv import set_key
+
+from core import analyze, backup, config, llm, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
+BACKUP_TASK_NAME = "DailyLogBackup"
+BACKUP_WEEKDAY_CHOICES = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 INTERVAL_CHOICES = (5, 10, 15, 30, 60)
 IDLE_CHOICES = config.IDLE_CHOICES
 RETENTION_CHOICES = config.RETENTION_CHOICES
@@ -208,9 +214,34 @@ def set_usage_enabled(enabled: bool) -> dict:
     return {"ok": True, "usage_enabled": enabled}
 
 
+# ---------- 自动备份 ----------
+
+def _backup_command() -> str:
+    return _task_command("--backup", "core/backup.py")
+
+
+def ensure_backup_task() -> None:
+    """按当前设置（幂等）注册每周备份任务计划：/sc weekly /d 周X /st 整点。"""
+    day = str(config.SETTINGS.get("backup_weekday", "SUN")).upper()
+    if day not in BACKUP_WEEKDAY_CHOICES:
+        day = "SUN"
+    hour = int(config.SETTINGS.get("backup_hour", 12))
+    _schtasks("/create", "/tn", BACKUP_TASK_NAME, "/tr", _backup_command(),
+              "/sc", "weekly", "/d", day, "/st", f"{hour:02d}:00", "/f")
+
+
 def persist_recording_choice(enabled: bool) -> None:
     """记录用户对定时记录开/停的选择（settings.json），供启动/恢复时遵守。"""
     _write_settings(recording_enabled=bool(enabled))
+
+
+def _key_hint(key: str) -> str:
+    """Key 的掩码提示（设置页展示用），如 sk-****abc4；绝不返回完整 Key。"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
 
 
 class Api:
@@ -338,8 +369,6 @@ class Api:
             "interval_minutes": config.SETTINGS.get("interval_minutes", 10),
             "interval_choices": list(INTERVAL_CHOICES),
             "report_name": config.REPORT_NAME,
-            "analyze_model": config.ANALYZE_MODEL,
-            "summary_model": config.SUMMARY_MODEL,
             "recording_enabled": task_is_enabled(),
             "next_capture": task_next_run(),
             "idle_enabled": bool(config.SETTINGS.get("idle_enabled", True)),
@@ -352,10 +381,32 @@ class Api:
             "enter_capture_interval": config.SETTINGS.get("enter_capture_interval", 15),
             "enter_interval_choices": list(config.ENTER_INTERVAL_CHOICES),
             "usage_enabled": bool(config.SETTINGS.get("usage_enabled", True)),
+            "backup_enabled": bool(config.SETTINGS.get("backup_enabled", True)),
+            "backup_dir": str(config.SETTINGS.get("backup_dir", "")),
+            "backup_weekday": str(config.SETTINGS.get("backup_weekday", "SUN")).upper(),
+            "backup_hour": int(config.SETTINGS.get("backup_hour", 12)),
+            "backup_keep": int(config.SETTINGS.get("backup_keep", 5)),
+            "backup_weekday_choices": list(BACKUP_WEEKDAY_CHOICES),
             "theme": config.SETTINGS.get("theme", "glass"),
             "test_interval_seconds": config.SETTINGS.get("test_interval_seconds"),
-            "has_analyze_key": bool(config.ANALYZE_API_KEY),
-            "has_summary_key": bool(config.DEEPSEEK_API_KEY),
+            "model_presets": [
+                {"id": pid, "label": p["label"], "base_url": p["base_url"],
+                 "default_model": p["default_model"], "hint": p["hint"]}
+                for pid, p in config.MODEL_PRESETS.items()
+            ],
+            "provider": config.MODEL_PROVIDER,
+            "provider_label": config.MODEL_PRESETS[config.MODEL_PROVIDER]["label"],
+            "base_url": config.MODEL_BASE_URL,
+            "model": config.MODEL_NAME,
+            "has_key": bool(config.MODEL_API_KEY),
+            "key_hint": _key_hint(config.MODEL_API_KEY),
+            "summary": {
+                "custom": config.MODEL_PROVIDER == "custom",
+                "base_url": config.DEEPSEEK_BASE_URL,
+                "model": config.SUMMARY_MODEL,
+                "has_key": bool(config.DEEPSEEK_API_KEY),
+                "key_hint": _key_hint(config.DEEPSEEK_API_KEY),
+            },
         }
 
     def get_logs(self, limit: int = 300) -> dict:
@@ -385,6 +436,176 @@ class Api:
             return {"ok": True, "test_interval_seconds": int(seconds)}
         except (ValueError, RuntimeError) as e:
             return {"ok": False, "error": str(e)}
+
+    def get_model_service(self) -> dict:
+        """设置页加载时回显全部供应商的模型服务配置（含各自 Key）。
+
+        前端缓存后切换供应商下拉时即时联动回显。纯本地应用：Key 本就明文存于
+        用户磁盘的 .env，回显到用户自己的界面没有额外暴露面。刻意不放进
+        轮询的 get_config，避免反复传输。
+        """
+        services = {}
+        for pid, preset in config.MODEL_PRESETS.items():
+            svc = config.MODEL_SERVICES.get(pid)
+            if not isinstance(svc, dict):
+                svc = {}
+            services[pid] = {
+                # 只回显用户填过的模型名（未填为空白，占位提示里展示默认值）
+                "model": str(svc.get("model", "")).strip(),
+                "base_url": str(svc.get("base_url", "")).strip() if pid == "custom" else preset["base_url"],
+                "key": config.model_key_for(pid),
+            }
+        ssvc = config.SUMMARY_SERVICES.get("custom")
+        if not isinstance(ssvc, dict):
+            ssvc = {}
+        return {
+            "ok": True,
+            "provider": config.MODEL_PROVIDER,
+            "services": services,
+            "summary": {
+                "model": str(ssvc.get("model", "")).strip(),
+                "base_url": str(ssvc.get("base_url", "")).strip(),
+                "key": config.summary_key(),
+            },
+        }
+
+    def save_model_service(self, provider: str, model: str, key: str = "",
+                           base_url: str = "", summary_model: str = "",
+                           summary_key: str = "", summary_base_url: str = "") -> dict:
+        """保存某供应商的模型服务：模型名写 settings.json，Key 写 .env，保存即生效。
+
+        各供应商的模型名/Key 相互独立（.env 键为 MODEL_KEY_<PROVIDER>）。
+        key 传空表示不修改该供应商的 Key。预设供应商的 base_url 以代码里的
+        官方端点为准；custom（双模型）另含「报告总结」一组配置，写
+        summary_services 与 MODEL_KEY_SUMMARY，未填字段按模板预置兜底。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip()
+        preset = config.MODEL_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知供应商: {provider}"}
+        model = (model or "").strip() or preset["default_model"]
+        if not model:
+            return {"ok": False, "error": "请填写模型名称"}
+        if provider == "custom":
+            base_url = (base_url or "").strip().rstrip("/")
+            if not base_url.startswith(("http://", "https://")):
+                return {"ok": False, "error": "自定义供应商需填写以 http(s):// 开头的接口地址"}
+        # custom 双模型：保存「报告总结」一组（字段留空沿用已存值；Key 留空不改）
+        summary_services: dict = {}
+        if provider == "custom":
+            summary_services = {k: dict(v) for k, v in config.SUMMARY_SERVICES.items()
+                                if isinstance(v, dict)}
+            ssvc = summary_services.setdefault("custom", {})
+            smodel = (summary_model or "").strip() or str(ssvc.get("model", "")).strip()
+            if not smodel:
+                return {"ok": False, "error": "请填写总结模型名称"}
+            ssvc["model"] = smodel
+            sbase = (summary_base_url or "").strip().rstrip("/") or str(ssvc.get("base_url", "")).strip()
+            if not sbase.startswith(("http://", "https://")):
+                return {"ok": False, "error": "请填写总结接口地址（http(s):// 开头）"}
+            ssvc["base_url"] = sbase
+            skey = (summary_key or "").strip()
+            if skey:
+                try:
+                    set_key(str(config.DATA_DIR / ".env"), "MODEL_KEY_SUMMARY", skey)
+                except OSError as e:
+                    _logger.error("写入 .env 失败: %s", e)
+                    return {"ok": False, "error": f"写入 .env 失败：{e}"}
+                os.environ["MODEL_KEY_SUMMARY"] = skey  # .env 只在启动时加载，同步进程环境
+        key = (key or "").strip()
+        if key:
+            env_name = f"MODEL_KEY_{provider.upper()}"
+            try:
+                set_key(str(config.DATA_DIR / ".env"), env_name, key)
+            except OSError as e:
+                _logger.error("写入 .env 失败: %s", e)
+                return {"ok": False, "error": f"写入 .env 失败：{e}"}
+            os.environ[env_name] = key  # .env 只在启动时加载，同步进程环境供 model_key_for 读取
+        # 更新该供应商的配置（其余供应商不动）；顺带清理旧版统一键
+        services = {k: dict(v) for k, v in config.MODEL_SERVICES.items() if isinstance(v, dict)}
+        svc = services.setdefault(provider, {})
+        svc["model"] = model
+        if provider == "custom":
+            svc["base_url"] = base_url
+        else:
+            svc.pop("base_url", None)
+        data = dict(config.SETTINGS)
+        data["model_provider"] = provider
+        data["model_services"] = services
+        if provider == "custom":
+            data["summary_services"] = summary_services
+        legacy_gone = data.pop("model_name", None) is not None or data.pop("model_base_url", None) is not None
+        config.SETTINGS.pop("model_name", None)   # config.SETTINGS 是 _write_settings 的
+        config.SETTINGS.pop("model_base_url", None)  # 合并源，需同步移除才能真正落盘删除
+        _write_settings(**data)
+        config.MODEL_SERVICES.clear()
+        config.MODEL_SERVICES.update(services)
+        if provider == "custom":
+            config.SUMMARY_SERVICES.clear()
+            config.SUMMARY_SERVICES.update(summary_services)
+        config.MODEL_PROVIDER = provider
+        config._apply_model_service()
+        # 只记供应商与模型名，不记 Key
+        _logger.info("模型服务已更新：%s / %s%s", provider, model,
+                     "（清理旧版配置）" if legacy_gone else "")
+        return {
+            "ok": True,
+            "provider": provider,
+            "provider_label": preset["label"],
+            "base_url": config.MODEL_BASE_URL,
+            "model": config.MODEL_NAME,
+            "has_key": bool(config.MODEL_API_KEY),
+            "key_hint": _key_hint(config.MODEL_API_KEY),
+            "summary_model": config.SUMMARY_MODEL,
+            "summary_has_key": bool(config.DEEPSEEK_API_KEY),
+            "summary_key_hint": _key_hint(config.DEEPSEEK_API_KEY),
+        }
+
+    def test_model_connection(self, provider: str = "", model: str = "",
+                              key: str = "", base_url: str = "",
+                              role: str = "analyze") -> dict:
+        """设置页"测试连接"：对表单当前草稿（供应商/模型/Key）发一条极短消息验证连通性。
+
+        Key/模型/地址留空时回退到该端点已保存值（再回退模板/预设默认），
+        方便只改了供应商就想先测的场景。role="summary" 测自定义双模型的
+        「报告总结」端点，回退链走 summary_services 与总结 Key。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip() or config.MODEL_PROVIDER
+        preset = config.MODEL_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知供应商: {provider}"}
+        if provider == "custom":
+            summary = role == "summary"
+            svc = config.SUMMARY_SERVICES.get("custom") if summary else config.MODEL_SERVICES.get("custom")
+            if not isinstance(svc, dict):
+                svc = {}
+            base_url = (base_url or "").strip().rstrip("/") or str(svc.get("base_url", "")).strip()
+            model = (model or "").strip() or str(svc.get("model", "")).strip()
+            key = (key or "").strip() or (config.summary_key() if summary else config.model_key_for("custom"))
+        else:
+            if not model or not str(model).strip():
+                svc = config.MODEL_SERVICES.get(provider)
+                model = (str(svc.get("model", "")).strip()
+                         if isinstance(svc, dict) else "") or preset["default_model"]
+            model = str(model).strip()
+            base_url = preset["base_url"]
+            key = (key or "").strip() or config.model_key_for(provider)
+        if not model:
+            return {"ok": False, "error": "请先填写模型名称"}
+        if not base_url.startswith(("http://", "https://")):
+            return {"ok": False, "error": "接口地址需以 http(s):// 开头"}
+        if not key:
+            return {"ok": False, "error": "尚未配置 API Key，请先填写并保存"}
+        result = llm.test_chat(base_url, key, model)
+        if result.get("ok"):
+            _logger.info("模型服务测试通过：%s / %s（%d ms）",
+                         provider, model, result.get("latency_ms", 0))
+        else:
+            _logger.warning("模型服务测试失败（%s / %s）：%s",
+                            provider, model, result.get("error", ""))
+        return result
 
     def clear_test_interval(self) -> dict:
         """清除测试间隔（恢复任务计划驱动的分钟级记录）。"""
@@ -437,7 +658,7 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def set_dedup(self, enabled: bool) -> dict:
-        """跳过重复画面开关（capture.py 的 md5 去重，默认开）。"""
+        """跳过重复画面开关（capture.py 的感知哈希去重，默认开）。"""
         _write_settings(dedup_enabled=bool(enabled))
         config.DEDUP_ENABLED = bool(enabled)
         return {"ok": True, "dedup_enabled": bool(enabled)}
@@ -467,6 +688,8 @@ class Api:
         "interval_minutes", "report_name", "idle_enabled", "idle_minutes",
         "retention_days", "recording_enabled", "dedup_enabled",
         "enter_capture_enabled", "enter_capture_interval", "usage_enabled", "theme",
+        "model_provider", "model_services",
+        "backup_enabled", "backup_dir", "backup_weekday", "backup_hour", "backup_keep",
     )
 
     def export_data(self, path: str) -> dict:
@@ -534,29 +757,104 @@ class Api:
         return {"ok": True, **restored}
 
     def clear_data(self) -> dict:
-        """清除历史数据：records/、reports/、截图、日志、待办；保留 .env 与 settings.json。"""
+        """清除历史数据：records/、reports/、截图、日志、待办；保留 .env 与 settings.json。
+
+        逐文件容错：单个文件删除失败（如被占用）不中断其余清理，最后汇总报错。
+        活跃日志被本进程的 handler 锁住（Windows 不能删打开中的文件），先摘 handler
+        释放句柄，删完在 finally 里重建，保证后续日志继续落盘。
+        """
         _logger = config.setup_logging()
         removed = {"records": 0, "reports": 0}
+        errors = []
+
+        def _unlink(paths, counter: str = "") -> None:
+            for p in paths:
+                try:
+                    p.unlink(missing_ok=True)
+                    if counter:
+                        removed[counter] += 1
+                except OSError as e:
+                    errors.append(f"{p.name}: {e}")
+
+        _unlink(list(config.RAW_DIR.glob("*.jsonl")) + list(config.RECORDS_DIR.glob("*.md")), "records")
+        _unlink(list(config.REPORTS_DIR.glob("*.md")), "reports")
+        _unlink(list(config.USAGE_DIR.glob("*.jsonl")))      # 应用使用时长数据一并清除
+        _unlink(list(config.SCREENSHOTS_DIR.glob("*.png")))  # 孤儿截图一并清除
+        logger = logging.getLogger("dailylog")
+        for h in logger.handlers[:]:
+            h.close()
+            logger.removeHandler(h)
         try:
-            for p in list(config.RAW_DIR.glob("*.jsonl")) + list(config.RECORDS_DIR.glob("*.md")):
-                p.unlink(missing_ok=True)
-                removed["records"] += 1
-            for p in config.REPORTS_DIR.glob("*.md"):
-                p.unlink(missing_ok=True)
-                removed["reports"] += 1
-            for p in config.USAGE_DIR.glob("*.jsonl"):  # 应用使用时长数据一并清除
-                p.unlink(missing_ok=True)
-            for p in config.SCREENSHOTS_DIR.glob("*.png"):  # 孤儿截图一并清除
-                p.unlink(missing_ok=True)
-            for p in config.DATA_DIR.glob("dailylog.log*"):
-                p.unlink(missing_ok=True)
-            config.TODOS_FILE.unlink(missing_ok=True)
-            config.STATE_FILE.unlink(missing_ok=True)
-        except OSError as e:
-            return {"ok": False, "error": str(e)}
+            _unlink(list(config.DATA_DIR.glob("dailylog.log*")))
+        finally:
+            config.setup_logging()  # handlers 已摘空，这里会重建；调用幂等
+        _unlink([config.TODOS_FILE, config.STATE_FILE])
+        if errors:
+            _logger.warning("数据清除部分失败: %s", "；".join(errors))
+            return {"ok": False, "error": "；".join(errors)}
         _logger.info("数据管理：已清除本地数据（%d 条记录、%d 份报告、日志与待办）",
                      removed["records"], removed["reports"])
         return {"ok": True, **removed}
+
+    def set_backup_settings(self, enabled: bool = None, backup_dir: str = None,
+                            weekday: str = None, hour: int = None, keep: int = None) -> dict:
+        """写备份设置并同步任务计划：开启且已选目录则注册（幂等），否则停用任务。"""
+        _logger = config.setup_logging()
+        updates = {}
+        if enabled is not None:
+            updates["backup_enabled"] = bool(enabled)
+        if backup_dir is not None:
+            updates["backup_dir"] = str(backup_dir).strip()
+        if weekday is not None:
+            weekday = str(weekday).upper()
+            if weekday not in BACKUP_WEEKDAY_CHOICES:
+                return {"ok": False, "error": f"星期必须是 {BACKUP_WEEKDAY_CHOICES} 之一"}
+            updates["backup_weekday"] = weekday
+        if hour is not None:
+            if not 0 <= int(hour) <= 23:
+                return {"ok": False, "error": "小时必须在 0-23 之间"}
+            updates["backup_hour"] = int(hour)
+        if keep is not None:
+            if not 1 <= int(keep) <= 52:
+                return {"ok": False, "error": "保留份数必须在 1-52 之间"}
+            updates["backup_keep"] = int(keep)
+        _write_settings(**updates)
+        enabled = bool(config.SETTINGS.get("backup_enabled", True))
+        has_dir = bool(str(config.SETTINGS.get("backup_dir", "")).strip())
+        try:
+            if enabled and has_dir:
+                ensure_backup_task()
+            else:
+                _set_task_enabled(False, BACKUP_TASK_NAME)
+        except RuntimeError as e:
+            _logger.error("自动备份任务计划注册失败: %s", e)
+            return {"ok": False, "error": f"任务计划注册失败: {e}"}
+        _logger.info("自动备份设置已更新: %s", updates)
+        return {"ok": True}
+
+    def run_backup_now(self) -> dict:
+        """设置页"立即备份"：同步执行打包（数据量小，秒级完成）。"""
+        return backup.run_backup()
+
+    def get_backup_info(self) -> dict:
+        """备份设置 + 上次执行结果（backup_state.json），供设置页展示。"""
+        state = {}
+        state_file = config.DATA_DIR / "backup_state.json"
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {}
+        return {
+            "ok": True,
+            "enabled": bool(config.SETTINGS.get("backup_enabled", True)),
+            "dir": str(config.SETTINGS.get("backup_dir", "")),
+            "weekday": str(config.SETTINGS.get("backup_weekday", "SUN")).upper(),
+            "hour": int(config.SETTINGS.get("backup_hour", 12)),
+            "keep": int(config.SETTINGS.get("backup_keep", 5)),
+            "weekday_choices": list(BACKUP_WEEKDAY_CHOICES),
+            "last": state,
+        }
 
     def db_stats(self) -> dict:
         """当前本地数据统计：容量 / 时间线条数 / 报告数 / 日志条数。"""

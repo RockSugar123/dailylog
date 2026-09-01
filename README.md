@@ -28,7 +28,7 @@
 ## ✨ 功能特性
 
 - **自动记录**：Windows 任务计划程序每 10 分钟驱动一次截屏分析，无需常驻进程
-- **智能跳过**：鼠标键盘静止（默认 ≥5 分钟）暂停、黑屏/睡眠跳过、画面去重（md5 比对）
+- **智能跳过**：鼠标键盘静止（默认 ≥5 分钟）暂停、黑屏/睡眠跳过、画面去重（感知哈希比对，任务栏时钟/光标微动不触发重复分析）
 - **手动截屏**：设置页按钮，5 秒倒计时后截取当前屏幕并记录；截屏瞬间自动隐藏应用自身窗口，界面不会进入截图
 - **时间线浏览**：按日/周/月查看活动轨迹、分类时长分布、专注时长估算
 - **应用时长统计**：前台进程采样，按日/周/月聚合各应用使用时长
@@ -60,7 +60,7 @@
 | 系统托盘 | pystray + pywin32 |
 | 屏幕截取 | mss + Pillow |
 | 空闲检测 | pywin32（GetLastInputInfo）+ pynput |
-| LLM 调用 | requests → NVIDIA NIM（视觉模型分析截图）+ DeepSeek（生成日报/周报） |
+| LLM 调用 | requests → DashScope（视觉模型分析截图）+ DeepSeek（生成日报/周报） |
 | 定时调度 | Windows 任务计划程序（schtasks） |
 | 配置管理 | python-dotenv（`.env`）+ settings.json |
 | 打包分发 | PyInstaller（onedir 模式） |
@@ -71,8 +71,8 @@
 
 - Windows 10/11（任务计划 + mss 截屏 + GetLastInputInfo 均为 Windows 能力）
 - Python 3.10+（开发验证环境 3.13）
-- 两个 API Key：
-  - **NVIDIA NIM**（截图分析，视觉模型，默认 `minimaxai/minimax-m3`）：<https://build.nvidia.com>
+- 两个 API Key（首次使用在应用设置页粘贴即可，见下）：
+  - **阿里云百炼 DashScope**（截图分析，视觉模型）： <https://platform.aliyuncs.com>
   - **DeepSeek 官方**（日报/周报总结）：<https://platform.deepseek.com>
 
 ### 1. 安装依赖
@@ -81,12 +81,14 @@
 pip install -r requirements.txt
 ```
 
-### 2. 配置 API Key
+### 2. 配置 API Key（推荐：设置页直接填）
 
-按 [.env.example](.env.example) 的键名填写（开发期放项目 `data\` 目录，打包版放在部署目录的 `dailylog-app\data\.env`）：
+打开应用 → **设置 → 模型服务**，粘贴两个 Key → **保存 Key** → 点 **测试连接** 验证。保存后立即生效（含定时任务），无需重启。
+
+也可以手动编辑 `.env`：按 [.env.example](.env.example) 的键名填写（开发期放项目 `data\` 目录，打包版放在部署目录的 `dailylog-app\data\.env`）：
 
 ```
-ANALYZE_API_KEY=你的NVIDIA Key
+ANALYZE_API_KEY=你的DashScope Key
 DEEPSEEK_API_KEY=sk-你的DeepSeekKey
 ```
 
@@ -194,7 +196,7 @@ schtasks /delete /tn DailyLogCapture /f   # 卸载
 
 ## 💰 成本估算（含去重）
 
-8h 工作 ≈ 48 次采样，去重后 15~25 条有效。费用与所选模型强相关：默认 `minimaxai/minimax-m3`（NVIDIA NIM，个人账户有免费额度），请以所选模型的输入/输出单价实测。
+8h 工作 ≈ 48 次采样，去重后 15~25 条有效。费用与所选模型强相关：以 `core/config.py` 中配置的百炼模型单价实测。
 
 ## 📦 目录结构
 

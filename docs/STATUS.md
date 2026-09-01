@@ -3,7 +3,7 @@
 > 约定：只维护这一个状态文档。每次会话结束时更新「当前状态」「遗留 / 注意事项」，
 > 过程性记录压缩进「变更日志」。历史详情见 git log。
 
-## 当前架构要点（截至 2026-08-25）
+## 当前架构要点（截至 2026-08-29）
 
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
@@ -30,6 +30,32 @@
   analyze 的 prompt 追加【当前前台窗口】块
 - 隐私决策：进程名 + 标题只进 prompt 不落盘 jsonl（标题本来就在截图里可见，泄露面未增加）
 
+### 画面感知去重（2026-08-29 落地）
+- 原「跳过重复画面」用整屏原始字节 md5 全等：任务栏时钟（10 分钟档必跳分钟位）、
+  光标移动都会击穿，生产 58 次成功 0 次跳过，去重形同虚设
+- 改为感知签名：裁掉任务栏（SPI_GETWORKAREA，仅原点主屏适用）→ 32×32 灰度图存
+  `state.json` 的 `last_sig`（base64，跨进程持久化），比对 dHash 汉明距离（阈值
+  `DEDUP_HASH_BITS=12`）或平均像素差（`DEDUP_PIXEL_DIFF=1.5`）任一超阈即视为变化
+- 阈值实测依据：静态底噪 ≤8 位（视频窗口微动），最小真实变化（角落通知）17 位；
+  未裁到任务栏时时钟跳变仅 1 位，阈值兜底有效
+- `last_failed`（上轮分析失败）仍放行重试；手动截屏 force 仍跳过去重；
+  旧 `last_hash` 首轮自动迁移（多记录一次）
+
+### 统一模型服务（2026-08-29 落地，同日晚补自定义双模型）
+- `config.MODEL_PRESETS`：预设供应商表（官方 OpenAI 兼容 base_url 代码内置，用户改不了）；
+  当前生效供应商 = `settings.json` 的 `model_provider`。预设供应商下截图分析与日报生成
+  **共用一个模型**；`custom`（自定义）为双模型模式：分析走 `model_services["custom"]`
+  （Key: `MODEL_KEY_CUSTOM`），总结走 `summary_services["custom"]`（Key: `MODEL_KEY_SUMMARY`），
+  完全手填无任何模型预置，未配全时 capture/summarize 给"去设置页填写"提示
+- `_apply_model_service()` 把当前供应商解析进模块变量并经 `ANALYZE_*`/`DEEPSEEK_*`
+  别名暴露（analyze.py/summarize.py 与任务计划独立进程零改动）；
+  `ui_api.save_model_service` 保存后调用它 + 同步 `os.environ`
+  （`.env` 只在启动时 load_dotenv，进程内保存必须补环境变量）
+- Key 解析链在 `config.model_key_for()` / `config.summary_key()`：
+  `MODEL_KEY_<供应商ID大写>` → 旧键按归属回退（dashscope/custom ← ANALYZE_API_KEY、
+  deepseek/总结 ← DEEPSEEK_API_KEY）；settings 未记录供应商时 `_default_provider()`
+  按 `nvapi-` 前缀默认进自定义，否则 dashscope
+
 ## 内存优化遗留方案（按收益排序，均未实施）
 1. **GPU 进程瘦身**（GPU ~300MB 是最大单项）：`--disable-gpu` 可砍大半但玻璃拟态 backdrop-filter 会卡；
    且 pywebview 6.2.1 把 AdditionalBrowserArguments 写死在 edgechromium.py:82，需 monkey-patch（升级易碎）
@@ -44,8 +70,47 @@
 - 改前端必须重跑 build.bat 部署到 `Desktop\dailylog-app` 才生效
 - 换部署位置时三处同步：桌面快捷方式、任务计划 DailyLogCapture/DailyLogUsage、build.bat 的 DEPLOY_DIR
 - 维护与打包约定见 `docs/MAINTENANCE.md`
+- 默认模型有时效性：供应商下架/更名后改 `config.MODEL_PRESETS` 的 `default_model` 即可
+  （用户已保存的 model_services 不受影响）
+- 新增预设供应商的前提：OpenAI 兼容端点 + 支持多模态视觉输入（截图分析需要）
+- 海外端点（如 NVIDIA NIM）直连受跨境波动影响：`llm._post_chat` 直连优先，
+  连接级失败自动经系统代理重试一次并按端点记忆（进程内）——国内端点行为不变；
+  代理工具需在线，否则海外端点不可用（报错已提示）
 
 ## 变更日志（摘要）
+
+### 2026-08-29 画面感知去重 + 自定义双模型 + 代理自动回退
+- **去重失效修复**：整屏 md5 被任务栏时钟/光标击穿（生产 58 成功 0 跳过），
+  改感知签名（见架构要点「画面感知去重」）；state.json `last_hash` → `last_sig` 自动迁移
+- **自定义双模型**：custom 拆「截图分析 / 报告总结」两组端点/模型/Key 独立配置
+  （settings.json 新增 `summary_services`，Key `MODEL_KEY_SUMMARY`）；
+  自定义无任何模型预置（个人配置不进代码），两组保存必填校验；
+  `nvapi-` 旧键自动进自定义模式；UI 分组表单 + 两组独立测试连接
+- **llm.py 代理自动回退**：直连优先，连接级失败经系统代理重试一次（按端点
+  进程内记忆）；超时/429 报错友好化。历史日志佐证：5 天 58 成功 0 连接超时，
+  直连常态可用，回退仅兜波动窗口（9×429 为 NIM 免费档限流，与代理无关）
+- 文档同步：README 中英文去重描述、analyze/summarize/关于弹窗的 NIM 残留文案清理；
+  build.bat 重新打包部署验证（生产 16:52 起连续成功）
+
+### 2026-08-29 模型服务重构：预设供应商下拉（4426373）
+- 设置页模型服务面板：原「截图分析 / 日报总结」双 Key 改为**预设供应商下拉**
+  （千问/智谱/OpenAI/Kimi/硅基流动/豆包/DeepSeek/自定义），官方 OpenAI 兼容端点
+  内置 `config.MODEL_PRESETS`，用户只填模型名称 + Key
+- **按供应商独立记忆**：模型名存 `settings.json` 的 `model_services`
+  （{pid: {model, base_url?}}），Key 存 `.env` 的 `MODEL_KEY_<供应商ID大写>`；
+  切换下拉即时联动回显，未保存过为空白
+- 截图分析与日报生成**统一走当前生效供应商**（预设均多模态）；config 经
+  `ANALYZE_*`/`DEEPSEEK_*` 别名兼容 analyze.py/summarize.py 及任务计划独立进程，
+  无需改调用点
+- 旧 Key 按归属回退：`ANALYZE_API_KEY`→千问、`DEEPSEEK_API_KEY`→DeepSeek
+  （旧统一键 `MODEL_API_KEY` 仅作千问回退，保存时自动清理旧版统一键）
+- 默认模型均为 2026-08 核实的在售多模态型号：`glm-5.3-flash`/`gpt-5-mini`/
+  `kimi-k3`/`Qwen3-VL-32B`/`doubao-seed-1-6-vision-250815`/`deepseek-v4-flash-vision-exp`
+- 前端 API 替换：`get_model_service`/`save_model_service`/`test_model_connection`
+  （测试按表单草稿、Key 留空回退已存值）替代旧的双 Key 三接口；
+  导出白名单加 `model_services`（Key 照旧永不进备份）
+- fix：采样常量 `ANALYZE_TEMPERATURE/TOP_P/MAX_TOKENS` 重构时误置函数内，
+  模块属性缺失致截屏分析全量报 AttributeError，已挪回模块级
 
 ### 2026-08-25 新功能：生成指定日期的日报（fe718d7）
 - 日报周报页新增日期选择器 + 「生成该日日报」按钮（默认今天；校验非空、不允许未来日期）

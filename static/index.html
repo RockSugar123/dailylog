@@ -258,6 +258,64 @@
         <div class="page-desc">配置截屏记录、模型通道与数据管理</div>
 
         <div class="panel">
+          <div class="panel-head">模型服务<span class="hint">选供应商，填模型名称与 Key，保存即生效，无需重启</span></div>
+          <div class="settings-row">
+            <label for="provider-btn">模型供应商</label>
+            <div class="select-wrap" id="provider-wrap">
+              <button class="select-btn" id="provider-btn">加载中<span class="caret">▾</span></button>
+              <div class="select-pop" id="provider-pop" hidden></div>
+            </div>
+          </div>
+          <!-- 自定义（双模型）分组标题，仅选自定义供应商时显示 -->
+          <div class="settings-row" id="ana-divider" hidden>
+            <label><b>分析模型</b></label>
+            <span class="hint">截图识别用，需支持图像输入</span>
+          </div>
+          <div class="settings-row" id="base-url-row" hidden>
+            <label for="base-url-input">接口地址</label>
+            <input type="text" id="base-url-input" class="key-input" placeholder="https://…/v1（OpenAI 兼容端点）" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label for="model-name-input">模型名称</label>
+            <input type="text" id="model-name-input" class="key-input" placeholder="如 qwen-vl-plus" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label for="key-model">API Key</label>
+            <input type="password" id="key-model" class="key-input" placeholder="粘贴 API Key" autocomplete="off" />
+            <button class="btn-ghost key-eye" id="key-model-eye" title="显示/隐藏">🙈</button>
+            <button class="btn-primary" id="key-model-test">测试连接</button>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="hint" id="key-model-status">正在加载模型服务配置…</span>
+          </div>
+          <!-- 自定义（双模型）专用：「报告总结」一组，仅选自定义供应商时显示 -->
+          <div class="settings-row" id="sum-divider" hidden>
+            <label><b>总结模型</b></label>
+            <span class="hint">日报/周报生成用</span>
+          </div>
+          <div class="settings-row" id="sum-base-url-row" hidden>
+            <label for="sum-base-url-input">接口地址</label>
+            <input type="text" id="sum-base-url-input" class="key-input" placeholder="https://…（OpenAI 兼容端点）" autocomplete="off" />
+          </div>
+          <div class="settings-row" id="sum-model-row" hidden>
+            <label for="sum-model-input">模型</label>
+            <input type="text" id="sum-model-input" class="key-input" placeholder="填写模型名称" autocomplete="off" />
+          </div>
+          <div class="settings-row" id="sum-key-row" hidden>
+            <label for="key-sum">API Key</label>
+            <input type="password" id="key-sum" class="key-input" placeholder="粘贴 API Key（留空不修改）" autocomplete="off" />
+            <button class="btn-ghost key-eye" id="key-sum-eye" title="显示/隐藏">🙈</button>
+            <button class="btn-primary" id="key-sum-test">测试连接</button>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="set-spacer"></span>
+            <button class="btn-primary" id="model-save">保存</button>
+          </div>
+        </div>
+
+        <div class="panel">
           <div class="panel-head">截图与记录</div>
           <div class="settings-row">
             <label for="theme-btn">界面皮肤</label>
@@ -342,6 +400,35 @@
             <span class="set-spacer"></span>
             <span class="hint">删除本地数据和日志，保留 API Key 配置</span>
             <button class="btn-danger" id="clear-data">🗑 删除</button>
+          </div>
+          <div class="settings-row">
+            <label>自动备份</label>
+            <label class="switch-label"><input type="checkbox" id="backup-enabled" checked /> 每周自动把 data/ 打包 zip 到备份目录（不含 API Key）</label>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <div class="select-wrap" id="backup-weekday-wrap">
+              <button class="select-btn" id="backup-weekday-btn">周日<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-weekday-pop" hidden></div>
+            </div>
+            <div class="select-wrap" id="backup-hour-wrap">
+              <button class="select-btn" id="backup-hour-btn">12:00<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-hour-pop" hidden></div>
+            </div>
+            <div class="select-wrap" id="backup-keep-wrap">
+              <button class="select-btn" id="backup-keep-btn">保留 5 份<span class="caret">▾</span></button>
+              <div class="select-pop" id="backup-keep-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint" id="backup-dir-hint">未选择备份目录</span>
+            <button class="btn-primary" id="backup-dir">📁 选择目录</button>
+            <button class="btn-primary" id="backup-now">立即备份</button>
+          </div>
+          <div class="settings-row">
+            <span class="set-spacer"></span>
+            <span class="hint" id="backup-last-hint"></span>
           </div>
           <div class="settings-row">
             <label>当前本地数据库文件大小</label>

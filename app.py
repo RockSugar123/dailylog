@@ -54,6 +54,24 @@ def resource_path(rel: str) -> Path:
     return base / rel
 
 
+def _cachebust_html() -> Path:
+    """生成带资产版本号的 index.html 派生文件（static/index_cachebust.html）。
+
+    WebView2 数据目录持久化（private_mode=False），会缓存旧 style.css/script.js，
+    改完前端重启应用仍显示旧界面。这里按资产文件 mtime 给引用追加 ?v= 参数：
+    文件一变 URL 即变，缓存自动失效，无需手动清缓存或改版本号。
+    必须与资产同目录（pywebview 以 html 所在目录为服务根），否则相对引用失效。
+    """
+    src = resource_path("static/index.html")
+    html = src.read_text(encoding="utf-8")
+    for attr, asset in (("href=", "style.css"), ("src=", "script.js")):
+        mtime = int((resource_path(f"static/{asset}")).stat().st_mtime)
+        html = html.replace(f'{attr}"{asset}"', f'{attr}"{asset}?v={mtime}"')
+    out = resource_path("static/index_cachebust.html")
+    out.write_text(html, encoding="utf-8")
+    return out
+
+
 class AppApi(ui_api.Api):
     """在 ui_api 基础上补充无边框窗口的控制方法（供前端标题栏按钮调用）。"""
 
@@ -128,6 +146,17 @@ class AppApi(ui_api.Api):
             return {"ok": False, "cancelled": True}
         return self.import_data(result[0])
 
+    def backup_dir_dialog(self) -> dict:
+        """设置页·自动备份：系统文件夹选择对话框选备份目录并保存。"""
+        try:
+            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        except Exception as e:  # noqa: BLE001
+            _logger.error("备份目录对话框失败: %s", e)
+            return {"ok": False, "error": str(e)}
+        if not result:
+            return {"ok": False, "cancelled": True}
+        return self.set_backup_settings(backup_dir=result[0])
+
     def minimize(self) -> None:
         self._window.minimize()
 
@@ -169,9 +198,14 @@ def main() -> None:
 
     def _create_window(hidden: bool):
         """创建主窗口（首次启动与零窗口重开共用同一套事件绑定）。"""
+        try:
+            page = str(_cachebust_html())
+        except Exception as e:  # noqa: BLE001 生成失败不阻塞启动，退回原始文件（可能吃缓存）
+            _logger.error("生成缓存穿透页面失败，退回原始 index.html: %s", e)
+            page = str(resource_path("static/index.html"))
         win = webview.create_window(
             config.APP_TITLE,
-            str(resource_path("static/index.html")),
+            page,
             width=1280, height=800, min_size=(960, 600),
             frameless=True,
             background_color="#060a09",
@@ -374,8 +408,19 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             _logger.error("启动恢复应用时长采样任务失败: %s", e)
 
+    def startup_backup():
+        """启动时按设置确保每周自动备份任务：开启且已选目录则创建（幂等），关闭则停用。"""
+        try:
+            if config.SETTINGS.get("backup_enabled", True) and config.SETTINGS.get("backup_dir"):
+                ui_api.ensure_backup_task()
+            else:
+                ui_api._set_task_enabled(False, ui_api.BACKUP_TASK_NAME)
+        except Exception as e:  # noqa: BLE001
+            _logger.error("启动恢复自动备份任务失败: %s", e)
+
     threading.Thread(target=startup_enable, daemon=True).start()
     threading.Thread(target=startup_usage, daemon=True).start()
+    threading.Thread(target=startup_backup, daemon=True).start()
 
     start_enter_listener()  # 回车键快速记录（全局监听，常驻）
 
@@ -425,6 +470,9 @@ if __name__ == "__main__":
     if "--usage" in sys.argv:
         from core import usage
         sys.exit(usage.main())
+    if "--backup" in sys.argv:  # 每周自动备份：任务计划调 exe --backup
+        from core import backup
+        sys.exit(backup.main())
     if "--diag" in sys.argv:  # 打包诊断：从控制台打印 get_config 与 NextRunTime 异常
         import json as _json
         import traceback as _tb
