@@ -339,7 +339,45 @@ class Api:
         path = config.REPORTS_DIR / name
         if not path.exists():
             return {"ok": False, "error": "报告不存在"}
-        return {"ok": True, "name": name, "content": path.read_text(encoding="utf-8")}
+        # mtime 带回前端用于保存冲突检测（编辑期间文件被外部改动时提示）
+        return {"ok": True, "name": name, "content": path.read_text(encoding="utf-8"),
+                "mtime": path.stat().st_mtime}
+
+    def save_report(self, name: str, content: str, base_mtime: float = 0.0) -> dict:
+        """保存（覆盖/另存为）报告正文。
+
+        - name 复用 get_report 的白名单校验，杜绝 ..\\ 路径穿越；
+        - 原子写（同目录临时文件 + replace），避免写一半断电留下损坏文件；
+        - base_mtime 非空且与磁盘 mtime 不一致时返回 conflict，由前端确认后再覆盖。
+        """
+        if not re.fullmatch(r"[\w\-]+\.md", name or ""):
+            return {"ok": False, "error": "非法的报告文件名"}
+        if not (content or "").strip():
+            return {"ok": False, "error": "正文为空，未保存"}
+        config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = config.REPORTS_DIR / name
+        if path.exists() and base_mtime:
+            if abs(path.stat().st_mtime - base_mtime) > 1e-6:
+                return {"ok": False, "conflict": True,
+                        "error": "文件在编辑期间被外部修改"}
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
+        except OSError as e:
+            tmp.unlink(missing_ok=True)
+            return {"ok": False, "error": f"写入失败：{e}"}
+        return {"ok": True, "name": name, "mtime": path.stat().st_mtime}
+
+    def open_report_dir(self, name: str) -> dict:
+        """在资源管理器中打开 reports/ 并选中该文件（名称同样走白名单校验）。"""
+        if not re.fullmatch(r"[\w\-]+\.md", name or ""):
+            return {"ok": False, "error": "非法的报告文件名"}
+        path = config.REPORTS_DIR / name
+        if not path.exists():
+            return {"ok": False, "error": "报告不存在"}
+        subprocess.Popen(["explorer", "/select,", str(path)])
+        return {"ok": True}
 
     # ---------- 待办 ----------
 

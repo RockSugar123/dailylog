@@ -196,6 +196,7 @@ _apply_model_service()
 ANALYZE_TEMPERATURE = 1
 ANALYZE_TOP_P = 0.95
 ANALYZE_MAX_TOKENS = 4096
+ANALYZE_THINKING = False   # 是否启用推理模型 thinking（deepseek-reasoner 等支持，可设置页开关）
 
 # 截屏调度
 MONITOR_INDEX = 1                # mss 监控器编号，1 = 主屏
