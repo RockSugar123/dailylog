@@ -657,6 +657,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .select-btn:hover { border-color: rgba(255, 107, 74, 0.45) }
 .select-btn:active { transform: scale(0.96); transition-duration: 0.06s }
 .select-btn .caret { font-size: 10px; color: var(--faint) }
+.panel { position: relative; }
+.panel:has(.select-pop:not([hidden])) { z-index: 70; }
 .select-pop {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
   min-width: 100%;
@@ -677,6 +679,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
   transition: background 0.15s ease;
 }
 .select-opt:hover { background: var(--brand-soft); color: var(--brand) }
+
+/* 模型供应商下拉项较多，限 5 项高度，超出滚轮查看 */
+#provider-pop { max-height: 190px; overflow-y: auto }
 
 .settings-status { display: grid; grid-template-columns: 120px 1fr; gap: 12px 14px; margin: 0; font-size: 13px }
 .settings-status dt { color: var(--faint) }
