@@ -63,9 +63,17 @@ One more thing: whenever you download any project, **always review the code for 
 | LLM calls | requests → DashScope (vision model analyzes screenshots) + DeepSeek (generates daily/weekly reports) |
 | Scheduling | Windows Task Scheduler (schtasks) |
 | Configuration | python-dotenv (`.env`) + settings.json |
-| Packaging | PyInstaller (onedir mode) |
+| Packaging | PyInstaller (onedir) + Inno Setup (installer wizard) |
 
 ## 🚀 Quick Start
+
+### Option 1: Installer (recommended)
+
+Download `dailylog-setup-1.0.0.exe` from [Releases](https://github.com/RockSugar123/dailylog/releases), run it, follow the wizard to pick an install folder and tick the desktop shortcut, then launch from the desktop shortcut. No Python or dependencies needed — on first launch, paste your two API keys under **Settings → Model Service** and you're set.
+
+The installer defaults to `%LOCALAPPDATA%\Programs\dailylog` (no admin rights, no UAC prompt; runtime data lives in that folder's `data\`, and uninstall keeps your data). For CLI / Task Scheduler calls, the exe path is `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe`.
+
+### Option 2: Run from source
 
 ### Requirements
 
@@ -109,9 +117,9 @@ On startup the app automatically registers the Windows scheduled task `DailyLogC
 | Generate today's daily report | `python core\summarize.py` |
 | Generate a specific day's report | `python core\summarize.py --day 2026-07-31` |
 | Generate a weekly report (ISO week of that date) | `python core\summarize.py --week 2026-07-31` |
-| Packaged desktop app | `..\dailylog-app\dailylog.exe` |
-| Packaged capture | `..\dailylog-app\dailylog.exe --capture` |
-| Packaged diagnostics (prints scheduler/config status) | `..\dailylog-app\dailylog.exe --diag` |
+| Installed desktop app | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe` |
+| Installed capture | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe --capture` |
+| Installed diagnostics (prints scheduler/config status) | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe --diag` |
 
 ### Registering the Windows scheduled task (optional; auto-registered on app startup)
 
@@ -119,8 +127,8 @@ On startup the app automatically registers the Windows scheduled task `DailyLogC
 # Development (pythonw = no console window; /f overwrites an existing task)
 schtasks /create /tn DailyLogCapture /tr "\"<full-path-to-pythonw>\" <absolute-project-path>\capture.py" /sc minute /mo 10 /f
 
-# Packaged build (deployed outside the repo, ..\dailylog-app\)
-schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dailylog-app\dailylog.exe\" --capture" /sc minute /mo 10 /f
+# Installed (defaults to %LOCALAPPDATA%\Programs\dailylog\)
+schtasks /create /tn DailyLogCapture /tr "\"%LOCALAPPDATA%\Programs\dailylog\dailylog.exe\" --capture" /sc minute /mo 10 /f
 
 schtasks /run /tn DailyLogCapture    # Trigger once manually (smoke test)
 schtasks /delete /tn DailyLogCapture /f   # Uninstall
@@ -236,6 +244,7 @@ dailylog/
 
 ```bash
 build.bat                 # The only entry: builds to a temp dir, then mirror-deploys to ..\dailylog-app (outside the repo)
+build_release.bat         # One-shot installer: runs build.bat, then Inno Setup wraps it into dist\dailylog-setup-x.x.x.exe
 pyinstaller dailylog.spec # Warning: onedir mode wipes and rebuilds the output directory!
 ```
 
