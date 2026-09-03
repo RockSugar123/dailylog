@@ -22,3 +22,4 @@ if errorlevel 8 (
 
 rmdir /s /q dist_build
 echo DONE: deployed to %DEPLOY_DIR%
+exit /b 0

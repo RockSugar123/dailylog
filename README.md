@@ -63,9 +63,17 @@
 | LLM 调用 | requests → DashScope（视觉模型分析截图）+ DeepSeek（生成日报/周报） |
 | 定时调度 | Windows 任务计划程序（schtasks） |
 | 配置管理 | python-dotenv（`.env`）+ settings.json |
-| 打包分发 | PyInstaller（onedir 模式） |
+| 打包分发 | PyInstaller（onedir）+ Inno Setup（安装向导） |
 
 ## 🚀 快速开始
+
+### 方式一：安装版（推荐）
+
+从 [Releases](https://github.com/RockSugar123/dailylog/releases) 下载 `dailylog-setup-1.0.0.exe`，双击运行，按向导选择安装目录、勾选桌面快捷方式，安装完成后从桌面快捷方式启动。安装版免装 Python 与依赖，首次启动在「设置 → 模型服务」填入两个 API Key 即可使用。
+
+安装版默认装到 `%LOCALAPPDATA%\Programs\dailylog`（免管理员权限、免 UAC；运行数据写在同目录的 `data\` 下，卸载不删数据）。如需命令行/任务计划调用，exe 路径即 `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe`。
+
+### 方式二：源码运行
 
 ### 环境要求
 
@@ -109,9 +117,9 @@ python app.py
 | 生成今天的日报 | `python core\summarize.py` |
 | 生成某日日报 | `python core\summarize.py --day 2026-07-31` |
 | 生成某周周报（该日期所在 ISO 周） | `python core\summarize.py --week 2026-07-31` |
-| 打包版桌面应用 | `..\dailylog-app\dailylog.exe` |
-| 打包版截屏记录 | `..\dailylog-app\dailylog.exe --capture` |
-| 打包诊断（打印任务计划/配置状态） | `..\dailylog-app\dailylog.exe --diag` |
+| 安装版桌面应用 | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe` |
+| 安装版截屏记录 | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe --capture` |
+| 安装版诊断（打印任务计划/配置状态） | `%LOCALAPPDATA%\Programs\dailylog\dailylog.exe --diag` |
 
 ### 注册 Windows 定时任务（可选，应用启动时会自动注册）
 
@@ -119,8 +127,8 @@ python app.py
 # 开发期（pythonw 无控制台窗口；/f 覆盖已存在任务）
 schtasks /create /tn DailyLogCapture /tr "\"<pythonw全路径>\" <项目绝对路径>\core\capture.py" /sc minute /mo 10 /f
 
-# 打包后（部署在项目外 ..\dailylog-app\）
-schtasks /create /tn DailyLogCapture /tr "\"C:\path\to\dailylog-app\dailylog.exe\" --capture" /sc minute /mo 10 /f
+# 安装后（默认装到 %LOCALAPPDATA%\Programs\dailylog\）
+schtasks /create /tn DailyLogCapture /tr "\"%LOCALAPPDATA%\Programs\dailylog\dailylog.exe\" --capture" /sc minute /mo 10 /f
 
 schtasks /run /tn DailyLogCapture    # 手动触发一次（冒烟测试）
 schtasks /delete /tn DailyLogCapture /f   # 卸载
@@ -235,6 +243,7 @@ dailylog/
 
 ```bash
 build.bat                 # 唯一入口：打包到临时目录再镜像部署到项目外 ..\dailylog-app
+build_release.bat         # 一键出安装包：先 build.bat 再 Inno Setup 封装为 dist\dailylog-setup-x.x.x.exe
 pyinstaller dailylog.spec # 注意：onedir 模式会清空重建输出目录！
 ```
 

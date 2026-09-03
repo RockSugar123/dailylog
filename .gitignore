@@ -14,6 +14,7 @@ venv/
 # 打包中间产物（部署目录在项目外：%~dp0..\dailylog-app）
 build/
 dist_build/
+dist/
 
 # Python
 __pycache__/
