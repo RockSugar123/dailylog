@@ -1,6 +1,6 @@
 [Setup]
 AppName=dailylog
-AppVersion=1.0.0
+AppVersion=1.1.0
 AppPublisher=dailylog
 DefaultDirName={localappdata}\Programs\dailylog
 DefaultGroupName=dailylog
@@ -8,7 +8,7 @@ PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
 OutputDir=dist
-OutputBaseFilename=dailylog-setup-1.0.0
+OutputBaseFilename=dailylog-setup-1.1.0
 UninstallDisplayIcon={app}\dailylog.exe
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64
