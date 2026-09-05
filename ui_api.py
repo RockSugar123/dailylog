@@ -14,7 +14,7 @@ from pathlib import Path
 
 from dotenv import set_key
 
-from core import analyze, ask, backup, config, indexer, llm, summarize, todos, usage
+from core import analyze, ask, backup, config, indexer, llm, sessions, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
@@ -426,15 +426,47 @@ class Api:
 
     # ---------- 问答检索 ----------
 
-    def ask_question(self, question: str) -> dict:
-        """历史日志问答：懒同步索引 → 检索相关片段 → 总结模型回答（附引用）。"""
+    def ask_question(self, question: str, session_id: str = "") -> dict:
+        """历史日志问答（一次性同步版）：检索 + 总结模型回答 + 落盘会话 + 首轮后起名。
+
+        GUI 走 app.py 的流式覆写版；此版本供无窗口场景/测试，行为对齐。
+        """
         try:
-            return {"ok": True, **ask.ask(question)}
+            result = ask.ask(question, session_id)
+            title = ask.maybe_generate_title(result.get("session_id", ""))
+            if title:
+                result["title"] = title
+                result["title_source"] = "ai"  # 起名成功即 temp→ai，与落盘状态保持一致
+            return {"ok": True, **result}
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:  # noqa: BLE001  网络/服务错误须给浮层可读提示，且落日志不吞
             config.setup_logging().error("问答失败: %s", e)
             return {"ok": False, "error": f"问答失败：{str(e)[:200]}"}
+
+    def list_ask_sessions(self) -> dict:
+        """历史会话列表（按更新时间倒序，供浮层「历史」视图）。"""
+        return {"ok": True, "sessions": sessions.list_sessions()}
+
+    def get_ask_session(self, session_id: str) -> dict:
+        """读取单个会话的完整消息（回看历史会话用）。"""
+        sess = sessions.load((session_id or "").strip())
+        if not sess:
+            return {"ok": False, "error": "会话不存在或已删除"}
+        return {"ok": True, **sess}
+
+    def rename_ask_session(self, session_id: str, title: str) -> dict:
+        """手动重命名历史会话（此后 AI 起名不再覆盖）。"""
+        sess = sessions.rename((session_id or "").strip(), title or "")
+        if not sess:
+            return {"ok": False, "error": "会话不存在或标题为空"}
+        return {"ok": True, "id": sess["id"], "title": sess["title"]}
+
+    def delete_ask_session(self, session_id: str) -> dict:
+        """删除历史会话（前端二次确认后调用，删除不可恢复）。"""
+        if not sessions.delete((session_id or "").strip()):
+            return {"ok": False, "error": "会话不存在或已删除"}
+        return {"ok": True}
 
     def get_embed_service(self) -> dict:
         """问答检索设置回显：预设清单 + 各供应商已存模型/Key（Key 明文回显，同 get_model_service）。"""

@@ -21,6 +21,7 @@
   --panel-strong: rgba(247, 235, 240, 0.12);
   --panel-border: rgba(246, 231, 238, 0.15);
   --glass-edge: rgba(255, 255, 255, 0.24);
+  --overlay: rgba(24, 19, 24, 0.9); /* 浮层级实底（问答浮层/弹窗）；浅色皮肤各自覆盖 */
   --brand: #ff6b4a;
   --brand-ink: #2b0a03;
   --brand-soft: rgba(255, 107, 74, 0.16);
@@ -818,7 +819,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
   width: min(680px, 100%); max-height: 82vh;
   display: flex; flex-direction: column;
   border-radius: 8px;
-  background: rgba(24, 33, 34, 0.84);
+  background: var(--overlay);
   border: 1px solid var(--glass-edge);
   backdrop-filter: blur(28px) saturate(135%);
   color: var(--ink);
@@ -828,12 +829,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 }
 @keyframes fadeIn { from { opacity: 0 } }
 @keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(0.96) } }
-.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.09) }
+.modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 12px; border-bottom: 1px solid var(--panel-border) }
 .modal-head h3 { margin: 0; font-size: 15px; font-weight: 600 }
-.modal-close { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(255, 255, 255, 0.07); color: var(--sub); font-size: 1.05rem }
-.modal-close:hover { background: rgba(255, 255, 255, 0.14); color: var(--ink) }
+.modal-close { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--panel); color: var(--sub); font-size: 1.05rem }
+.modal-close:hover { background: var(--panel-strong); color: var(--ink) }
 .modal-body { padding: 18px 22px; overflow-y: auto; font-size: 13.5px; line-height: 1.6 }
-.modal-foot { padding: 12px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; color: var(--faint); word-break: break-all }
+.modal-foot { padding: 12px 22px 18px; border-top: 1px solid var(--panel-border); font-size: 12px; color: var(--faint); word-break: break-all }
 
 .rec-label { display: inline-block; margin: 10px 0 6px; padding: 3px 12px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 12px; font-weight: 600 }
 .rec-block { margin: 12px 0 }
@@ -847,8 +848,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); cur
 .md-body ul, .md-body ol { margin: 8px 0; padding-left: 22px }
 .md-body li { margin: 4px 0 }
 .md-body table { border-collapse: collapse; margin: 12px 0; width: 100%; font-size: 12.5px }
-.md-body th, .md-body td { border: 1px solid rgba(255, 255, 255, 0.18); padding: 6px 10px; text-align: left }
-.md-body th { background: rgba(255, 255, 255, 0.07) }
+.md-body th, .md-body td { border: 1px solid var(--panel-border); padding: 6px 10px; text-align: left }
+.md-body th { background: var(--panel-strong) }
 
 /* 提示条 */
 .toast {
@@ -924,6 +925,7 @@ body.theme-paper {
   --panel-strong: rgba(0, 0, 0, 0.07);
   --panel-border: #e6e0d6;
   --glass-edge: #cdc5b8;
+  --overlay: rgba(250, 247, 242, 0.94);
   --brand: #b4552d;
   --brand-ink: #fff7f2;
   --brand-soft: rgba(180, 85, 45, 0.09);
@@ -1036,6 +1038,7 @@ body.theme-journal {
   --panel-strong: rgba(255, 255, 255, 0.95);
   --panel-border: #e8dfd3;
   --glass-edge: #e8dfd3;
+  --overlay: rgba(253, 249, 240, 0.93);
   --brand: #ff9a6c;
   --brand-ink: #ffffff;
   --brand-soft: rgba(255, 179, 138, 0.16);
@@ -1415,6 +1418,7 @@ body.theme-mint {
   --panel-strong: rgba(255, 255, 255, 0.95);
   --panel-border: #dbebe4;
   --glass-edge: #cfe6dd;
+  --overlay: rgba(245, 251, 248, 0.93);
   --brand: #0eaa7d;
   --brand-ink: #ffffff;
   --brand-soft: rgba(14, 170, 125, 0.12);
@@ -1526,6 +1530,7 @@ body.theme-sakura {
   --panel-strong: rgba(255, 255, 255, 0.95);
   --panel-border: #f2d7e0;
   --glass-edge: #eec3d2;
+  --overlay: rgba(255, 250, 252, 0.92);
   --brand: #e8608a;
   --brand-ink: #ffffff;
   --brand-soft: rgba(232, 96, 138, 0.12);
@@ -1713,18 +1718,17 @@ body.theme-sakura .fx-blobs { --blob-a: rgba(255, 163, 185, 0.22); --blob-b: rgb
   position: fixed;
   right: 22px; bottom: 78px;
   z-index: 90;
-  width: 380px;
+  width: 480px;
   max-width: calc(100vw - 44px);
-  height: 520px;
+  height: 640px;
   max-height: calc(100vh - 130px);
   display: flex;
   flex-direction: column;
   border-radius: 16px;
-  background: rgba(24, 19, 24, 0.92);
+  background: var(--overlay);
   border: 1px solid var(--panel-border);
   backdrop-filter: blur(24px) saturate(130%);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  overflow: hidden;
 }
 .ask-head {
   flex: none;
@@ -1798,6 +1802,112 @@ body.theme-sakura .fx-blobs { --blob-a: rgba(255, 163, 185, 0.22); --blob-b: rgb
   align-items: center;
   justify-content: center;
 }
+
+/* 头部操作条：历史 ☰ / 标题 / 新建 ＋ / 关闭 × */
+.ask-hbtn {
+  flex: none;
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  color: var(--faint);
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+}
+.ask-hbtn:hover { background: var(--panel-strong); color: var(--ink) }
+.ask-hbtn:disabled { opacity: 0.4; pointer-events: none }
+.ask-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 历史会话列表：悬浮于消息区上部（约55%），下方最近的对话仍可见 */
+.ask-history-view {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  right: 10px;
+  top: 52px;
+  height: 55%;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--overlay);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(24px) saturate(130%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}
+.ask-hist-empty { font-size: 12.5px; color: var(--faint); line-height: 1.9; padding: 8px 2px }
+.ask-hist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  cursor: pointer;
+}
+.ask-hist-item:hover { border-color: rgba(255, 107, 74, 0.35) }
+.ask-hist-item.confirming { cursor: default; border-color: rgba(220, 68, 55, 0.5) }
+.ask-hist-main { flex: 1; min-width: 0 }
+.ask-hist-title {
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-hist-meta { font-size: 11px; color: var(--faint); margin-top: 2px }
+.ask-hist-act {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  color: var(--faint);
+  background: transparent;
+  font-size: 12px;
+  line-height: 1;
+}
+.ask-hist-act:hover { background: var(--panel-strong); color: var(--ink) }
+.ask-hist-act.danger:hover { color: var(--danger) }
+.ask-hist-edit {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--panel-strong);
+  color: var(--ink);
+  border: 1px solid rgba(255, 107, 74, 0.4);
+  outline: none;
+}
+.ask-hist-confirm-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ask-hist-del-yes, .ask-hist-del-no {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.ask-hist-del-yes { background: var(--danger); color: #fff }
+.ask-hist-del-no { background: var(--panel-strong); color: var(--sub) }
+
 .ask-input-row {
   flex: none;
   display: flex;

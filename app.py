@@ -116,12 +116,14 @@ class AppApi(ui_api.Api):
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True}
 
-    def ask_question(self, question: str) -> dict:
+    def ask_question(self, question: str, session_id: str = "") -> dict:
         """历史日志问答（流式）：后台线程执行检索与生成，增量经 evaluate_js 推给前端。
 
+        会话由 session_id 指定（空串 = 新会话，落盘后经 __askDone 回传真实 id）；
+        首轮问答完成后再触发一次 AI 起名，经 __askTitle 推送。
         同步跑会阻塞 JS 桥（几十秒生成期间窗口控制全部无响应），所以立即返回，
-        前端通过 window.__askDelta / __askDone / __askError 接收进度。增量推送按
-        80ms 节流，避免每个 token 一次跨桥调用的开销。
+        前端通过 window.__askDelta / __askDone / __askTitle / __askError 接收进度。
+        增量推送按 80ms 节流，避免每个 token 一次跨桥调用的开销。
         """
         def push(js: str) -> None:
             try:
@@ -132,6 +134,7 @@ class AppApi(ui_api.Api):
         def run():
             from core import ask  # noqa: PLC0415
             state = {"buf": "", "last": time.monotonic()}
+            result = None
 
             def on_delta(text: str) -> None:
                 state["buf"] += text
@@ -142,11 +145,12 @@ class AppApi(ui_api.Api):
                     state["last"] = now
 
             try:
-                result = ask.ask_stream(question, on_delta)
+                result = ask.ask_stream(question, session_id, on_delta)
                 if state["buf"]:
                     push(f"window.__askDelta({json.dumps(state['buf'])})")
                 push(f"window.__askDone({json.dumps(result, ensure_ascii=False)})")
-                _logger.info("问答完成（检索 %d 块）", len(result.get("citations", [])))
+                _logger.info("问答完成（检索 %d 块，会话 %s）",
+                             len(result.get("citations", [])), result.get("session_id", ""))
             except ValueError as e:
                 try:
                     push(f"window.__askError({json.dumps(str(e))})")
@@ -158,6 +162,16 @@ class AppApi(ui_api.Api):
                     push(f"window.__askError({json.dumps(f'问答失败：{str(e)[:200]}')})")
                 except Exception:  # noqa: BLE001 窗口已关闭
                     pass
+                return
+            # 起名放在 __askDone 之后：不拖慢前端恢复输入；失败只落日志不动临时标题
+            if result and result.get("session_id"):
+                try:
+                    title = ask.maybe_generate_title(result["session_id"])
+                    if title:
+                        push(f"window.__askTitle({json.dumps(result['session_id'])}, "
+                             f"{json.dumps(title)})")
+                except Exception as e:  # noqa: BLE001 窗口可能已关闭
+                    _logger.warning("会话起名推送失败: %s", e)
 
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True, "started": True}

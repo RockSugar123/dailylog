@@ -1084,20 +1084,57 @@ document.getElementById("ed-regen").addEventListener("click", async () => {
   toast("已重新生成并回填");
 });
 
-/* ===================== 问答浮层（历史日志 RAG 问答） ===================== */
+/* ===================== 问答浮层（历史日志 RAG 问答 + 历史会话） ===================== */
 
 let askBusy = false;
+let askSessionId = localStorage.getItem("askLastSessionId") || "";
+const askWelcomeHTML = document.getElementById("ask-msgs").innerHTML;
+
+function setAskTitle(text) {
+  document.getElementById("ask-title").textContent = text || "问一问 · 历史记录";
+}
+
+/* 忙碌时锁定发送/历史/新建，避免流式结果落错会话（关闭浮层不受限） */
+function setAskBusy(busy) {
+  askBusy = busy;
+  document.getElementById("ask-send").disabled = busy;
+  document.getElementById("ask-history").disabled = busy;
+  document.getElementById("ask-new").disabled = busy;
+}
 
 function toggleAskPanel(open) {
   const panel = document.getElementById("ask-panel");
   const show = open === undefined ? panel.hidden : !!open;
   panel.hidden = !show;
-  if (show) setTimeout(() => document.getElementById("ask-input").focus(), 60);
+  if (show) {
+    toggleAskHistory(false);  // 重开回到消息视图（同时复位消息区的隐藏态）
+    // 流式进行中不动 DOM（气泡还在原地继续渲染）；否则恢复上次会话的存档
+    if (!askStreamBot) restoreLastAskSession();
+    setTimeout(() => document.getElementById("ask-input").focus(), 60);
+  }
 }
+
+async function restoreLastAskSession() {
+  if (!askSessionId) return;
+  const r = await apiCall("get_ask_session", askSessionId);
+  if (r && r.ok) {
+    setAskTitle(r.title);
+    renderSessionMessages(r.messages);
+  } else {
+    // 存档的会话已被删除/损坏：回到新会话状态
+    askSessionId = "";
+    localStorage.removeItem("askLastSessionId");
+    setAskTitle("");
+    document.getElementById("ask-msgs").innerHTML = askWelcomeHTML;
+  }
+}
+
 document.getElementById("ask-fab").addEventListener("click", () => toggleAskPanel());
 document.getElementById("ask-close").addEventListener("click", () => toggleAskPanel(false));
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !document.getElementById("ask-panel").hidden) toggleAskPanel(false);
+  if (e.key !== "Escape" || document.getElementById("ask-panel").hidden) return;
+  if (!document.getElementById("ask-history-view").hidden) toggleAskHistory(false);
+  else toggleAskPanel(false);
 });
 
 /* 引用卡片文案：日报带时间段，报告用文件名（去 .md） */
@@ -1135,7 +1172,162 @@ function renderAskAnswer(box, r) {
   });
 }
 
-/* 流式接收：后端线程经 evaluate_js 推增量/完成/失败（ask_question 立即返回不阻塞桥） */
+/* 回看存档会话：按消息顺序还原（用户消息 + 带引用的回答） */
+function renderSessionMessages(messages) {
+  const msgs = document.getElementById("ask-msgs");
+  msgs.innerHTML = "";
+  (messages || []).forEach((m) => {
+    const div = document.createElement("div");
+    if (m.role === "user") {
+      div.className = "ask-msg ask-msg-user";
+      div.textContent = m.content || "";
+    } else {
+      div.className = "ask-msg ask-msg-bot";
+      renderAskAnswer(div, { answer: m.content || "", citations: m.citations || [] });
+    }
+    msgs.appendChild(div);
+  });
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+/* ---------- 历史会话列表 ---------- */
+
+function toggleAskHistory(open) {
+  const view = document.getElementById("ask-history-view");
+  const show = open === undefined ? view.hidden : !!open;
+  view.hidden = !show;  // 浮层只盖消息区上部，消息区保持可见，不互斥
+  if (show) refreshAskHistory();
+}
+
+async function refreshAskHistory() {
+  const view = document.getElementById("ask-history-view");
+  const r = await apiCall("list_ask_sessions");
+  if (!r || !r.ok) {
+    view.innerHTML = `<div class="ask-hist-empty">${escapeHtml((r && r.error) || "无法加载历史会话")}</div>`;
+    return;
+  }
+  const list = r.sessions || [];
+  if (!list.length) {
+    view.innerHTML = '<div class="ask-hist-empty">还没有历史会话。<br/>问第一个问题后，这里就会出现会话列表。</div>';
+    return;
+  }
+  view.innerHTML = "";
+  list.forEach((s) => view.appendChild(askHistoryItem(s)));
+}
+
+function askHistoryItem(s) {
+  const item = document.createElement("div");
+  item.className = "ask-hist-item";
+  const main = document.createElement("div");
+  main.className = "ask-hist-main";
+  main.innerHTML = `<div class="ask-hist-title">${escapeHtml(s.title || "未命名会话")}</div>` +
+    `<div class="ask-hist-meta">${escapeHtml((s.updated_at || "").slice(0, 19).replace("T", " "))} · ${s.turns || 0} 轮</div>`;
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "ask-hist-act";
+  renameBtn.title = "重命名";
+  renameBtn.textContent = "✎";
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "ask-hist-act danger";
+  delBtn.title = "删除";
+  delBtn.textContent = "×";
+  item.append(main, renameBtn, delBtn);
+  item.addEventListener("click", () => {
+    if (!item.classList.contains("confirming")) openAskSession(s.id);
+  });
+  renameBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    startAskRename(item, s);
+  });
+  delBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    startAskDelete(item, s);
+  });
+  return item;
+}
+
+async function openAskSession(id) {
+  const r = await apiCall("get_ask_session", id);
+  if (!r || !r.ok) {
+    toast((r && r.error) || "会话加载失败");
+    refreshAskHistory();
+    return;
+  }
+  askSessionId = r.id;
+  localStorage.setItem("askLastSessionId", r.id);
+  setAskTitle(r.title);
+  renderSessionMessages(r.messages);
+  toggleAskHistory(false);
+}
+
+function newAskSession() {
+  askSessionId = "";
+  localStorage.removeItem("askLastSessionId");
+  setAskTitle("");
+  document.getElementById("ask-msgs").innerHTML = askWelcomeHTML;
+  toggleAskHistory(false);
+}
+
+/* 重命名：标题原地变输入框，Enter/失焦保存，Esc 取消 */
+function startAskRename(item, s) {
+  const titleEl = item.querySelector(".ask-hist-title");
+  const input = document.createElement("input");
+  input.className = "ask-hist-edit";
+  input.maxLength = 50;
+  input.value = s.title || "";
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const v = input.value.trim();
+    if (save && v && v !== s.title) {
+      const r = await apiCall("rename_ask_session", s.id, v);
+      if (r && r.ok) {
+        s.title = r.title;
+        if (s.id === askSessionId) setAskTitle(r.title);
+      } else {
+        toast((r && r.error) || "重命名失败");
+      }
+    }
+    refreshAskHistory();
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();  // 不让 Esc 冒泡关掉浮层
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+  input.addEventListener("click", (e) => e.stopPropagation());
+}
+
+/* 删除：条目原地变成二次确认行，防误删 */
+function startAskDelete(item, s) {
+  item.classList.add("confirming");
+  item.innerHTML = `<span class="ask-hist-confirm-text">删除「${escapeHtml(s.title || "")}」？</span>` +
+    '<button type="button" class="ask-hist-del-yes">删除</button>' +
+    '<button type="button" class="ask-hist-del-no">取消</button>';
+  item.querySelector(".ask-hist-del-yes").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const r = await apiCall("delete_ask_session", s.id);
+    if (!r || !r.ok) toast((r && r.error) || "删除失败");
+    else if (s.id === askSessionId) newAskSession();  // 删的是当前打开的会话 → 回新会话
+    refreshAskHistory();
+  });
+  item.querySelector(".ask-hist-del-no").addEventListener("click", (e) => {
+    e.stopPropagation();
+    refreshAskHistory();
+  });
+}
+
+document.getElementById("ask-history").addEventListener("click", () => toggleAskHistory());
+document.getElementById("ask-new").addEventListener("click", newAskSession);
+
+/* ---------- 流式接收：后端线程经 evaluate_js 推增量/完成/起名/失败 ---------- */
+
 let askStreamText = "";
 let askStreamBot = null;
 
@@ -1148,17 +1340,25 @@ window.__askDelta = (text) => {
 };
 window.__askDone = (r) => {
   if (!askStreamBot) return;
-  askBusy = false;
-  document.getElementById("ask-send").disabled = false;
+  setAskBusy(false);
   renderAskAnswer(askStreamBot, r);
   askStreamBot = null;
   askStreamText = "";
+  if (r && r.session_id) {
+    askSessionId = r.session_id;
+    localStorage.setItem("askLastSessionId", r.session_id);
+  }
+  if (r && r.title) setAskTitle(r.title);
   document.getElementById("ask-msgs").scrollTop = document.getElementById("ask-msgs").scrollHeight;
+};
+window.__askTitle = (sid, title) => {
+  if (!sid || !title) return;
+  if (sid === askSessionId) setAskTitle(title);
+  if (!document.getElementById("ask-history-view").hidden) refreshAskHistory();
 };
 window.__askError = (msg) => {
   if (!askStreamBot) return;
-  askBusy = false;
-  document.getElementById("ask-send").disabled = false;
+  setAskBusy(false);
   askStreamBot.innerHTML = `<span class="ask-err">${escapeHtml(msg || "问答失败")}</span>`;
   askStreamBot = null;
   askStreamText = "";
@@ -1170,12 +1370,12 @@ document.getElementById("ask-form").addEventListener("submit", async (e) => {
   const input = document.getElementById("ask-input");
   const q = input.value.trim();
   if (!q) return;
+  if (!document.getElementById("ask-history-view").hidden) toggleAskHistory(false);  // 历史列表开着时提问 → 先切回消息视图，让流式回答可见
   const msgs = document.getElementById("ask-msgs");
   const welcome = msgs.querySelector(".ask-welcome");
   if (welcome) welcome.remove();
   input.value = "";
-  askBusy = true;
-  document.getElementById("ask-send").disabled = true;
+  setAskBusy(true);
   const user = document.createElement("div");
   user.className = "ask-msg ask-msg-user";
   user.textContent = q;
@@ -1186,18 +1386,16 @@ document.getElementById("ask-form").addEventListener("submit", async (e) => {
   msgs.appendChild(askStreamBot);
   msgs.scrollTop = msgs.scrollHeight;
   askStreamText = "";
-  const r = await apiCall("ask_question", q);
+  const r = await apiCall("ask_question", q, askSessionId);
   // 提交失败/后端拒绝时立刻恢复；成功启动流式后由 __askDone/__askError 收尾
   if (!r) {
-    askBusy = false;
-    document.getElementById("ask-send").disabled = false;
+    setAskBusy(false);
     if (askStreamBot) askStreamBot.innerHTML = '<span class="ask-err">未连接到后端</span>';
     askStreamBot = null;
     return;
   }
   if (!r.ok) {
-    askBusy = false;
-    document.getElementById("ask-send").disabled = false;
+    setAskBusy(false);
     if (askStreamBot) askStreamBot.innerHTML = `<span class="ask-err">${escapeHtml(r.error || "问答失败")}</span>`;
     askStreamBot = null;
   }

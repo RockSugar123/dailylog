@@ -257,6 +257,9 @@ _apply_embed_service()
 # 问答检索参数
 EMBED_BATCH = 10   # 单次 /embeddings 请求的文本条数上限（百炼 text-embedding-v4 限制 10）
 ASK_TOP_K = 8      # 每次问答召回的相关片段数
+ASK_REWRITE_TURNS = 3     # 检索词改写携带的最近对话轮数（一轮 = 一问一答）
+ASK_ANSWER_TURNS = 6      # 回答 prompt 携带的最近对话轮数
+ASK_TITLE_MAX_CHARS = 16  # AI 提炼的会话标题长度上限
 
 # 截图分析采样参数（固定常量，与供应商无关；analyze.py 调用点）
 ANALYZE_TEMPERATURE = 1
@@ -290,6 +293,7 @@ REPORTS_DIR = DATA_DIR / "reports"
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 TODOS_FILE = RECORDS_DIR / "todos.json"
 STATE_FILE = DATA_DIR / "state.json"
+SESSIONS_DIR = DATA_DIR / "sessions"  # 问答会话存档（每会话一个 JSON，随每周备份打包）
 
 # 应用使用时长统计（前台窗口采样，任务计划 DailyLogUsage 每 2 分钟驱动一次）
 USAGE_DIR = RECORDS_DIR / "usage"

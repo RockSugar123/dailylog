@@ -525,12 +525,15 @@
   <button class="ask-fab" id="ask-fab" title="问一问历史记录">问</button>
   <div class="ask-panel" id="ask-panel" hidden>
     <header class="ask-head">
-      <span class="ask-title">问一问 · 历史记录</span>
+      <button class="ask-hbtn" id="ask-history" title="历史会话">☰</button>
+      <span class="ask-title" id="ask-title">问一问 · 历史记录</span>
+      <button class="ask-hbtn" id="ask-new" title="新建会话">＋</button>
       <button class="ask-close" id="ask-close" aria-label="关闭">×</button>
     </header>
     <div class="ask-msgs" id="ask-msgs">
       <div class="ask-welcome">用一句自然语言问过去的工作，比如：<br/>「上个月我都在忙什么」「哪天修过那个字体 bug」<br/>回答会附上可点击跳转的来源记录。</div>
     </div>
+    <div class="ask-history-view" id="ask-history-view" hidden></div>
     <form class="ask-input-row" id="ask-form">
       <input type="text" id="ask-input" placeholder="问问你的历史记录…" autocomplete="off" maxlength="200" />
       <button class="btn-primary" id="ask-send" type="submit">发送</button>
