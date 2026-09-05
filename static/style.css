@@ -1690,3 +1690,131 @@ body.theme-sakura .fx-blobs { --blob-a: rgba(255, 163, 185, 0.22); --blob-b: rgb
 .heatmap-cell:hover { outline: 2px solid var(--brand); outline-offset: 1px }
 .report-export-actions { width: 100%; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border) }
 .report-export-actions .btn-ghost { flex: 1 }
+
+/* ===== 问答浮层（历史日志 RAG 问答）：悬浮球 + 对话面板，任意页签可唤出 ===== */
+.ask-fab {
+  position: fixed;
+  right: 22px; bottom: 22px;
+  z-index: 90;
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 24px rgba(255, 107, 74, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+.ask-fab:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 10px 28px rgba(255, 107, 74, 0.45) }
+.ask-fab:active { transform: scale(0.94); transition-duration: 0.06s }
+
+.ask-panel {
+  position: fixed;
+  right: 22px; bottom: 78px;
+  z-index: 90;
+  width: 380px;
+  max-width: calc(100vw - 44px);
+  height: 520px;
+  max-height: calc(100vh - 130px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: rgba(24, 19, 24, 0.92);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(24px) saturate(130%);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.ask-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 12px 11px 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.ask-title { font-size: 13.5px; font-weight: 600; color: var(--sub) }
+.ask-close {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  color: var(--faint);
+  background: transparent;
+  font-size: 15px;
+  line-height: 1;
+}
+.ask-close:hover { background: var(--panel-strong); color: var(--ink) }
+.ask-msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px }
+.ask-welcome { font-size: 12.5px; color: var(--faint); line-height: 1.8; padding: 6px 2px }
+.ask-msg {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+.ask-msg-user {
+  align-self: flex-end;
+  background: var(--brand-soft);
+  border: 1px solid rgba(255, 107, 74, 0.28);
+  border-bottom-right-radius: 4px;
+}
+.ask-msg-bot {
+  align-self: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-bottom-left-radius: 4px;
+}
+.ask-msg-bot .ask-answer p { margin: 0 0 6px }
+.ask-msg-bot .ask-answer p:last-child { margin-bottom: 0 }
+.ask-loading { color: var(--faint); font-size: 12.5px; animation: askPulse 1.2s ease-in-out infinite }
+@keyframes askPulse { 50% { opacity: 0.45 } }
+.ask-err { color: var(--danger); font-size: 12.5px }
+.ask-cites { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
+.ask-cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  background: var(--panel-strong);
+  border: 1px solid var(--panel-border);
+  font-size: 11.5px;
+  color: var(--sub);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.ask-cite:hover { border-color: rgba(255, 107, 74, 0.45); color: var(--brand) }
+.ask-cite-n {
+  flex: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ask-input-row {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--panel-border);
+}
+.ask-input-row input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  color: var(--ink);
+  font-size: 13px;
+}
+.ask-input-row input:focus { outline: 2px solid var(--brand); outline-offset: 1px }
+.ask-input-row .btn-primary { height: 34px; padding: 0 14px; font-size: 13px }

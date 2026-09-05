@@ -3,7 +3,7 @@
 > 约定：只维护这一个状态文档。每次会话结束时更新「当前状态」「遗留 / 注意事项」，
 > 过程性记录压缩进「变更日志」。历史详情见 git log。
 
-## 当前架构要点（截至 2026-08-29）
+## 当前架构要点（截至 2026-09-05）
 
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
@@ -56,6 +56,19 @@
   deepseek/总结 ← DEEPSEEK_API_KEY）；settings 未记录供应商时 `_default_provider()`
   按 `nvapi-` 前缀默认进自定义，否则 dashscope
 
+### 历史日志问答（RAG，2026-09-05 落地）
+- 右下角悬浮球唤出对话浮层（应用内 HTML 浮层，z-index 90 夹在内容与弹窗 100 之间）：
+  提问 → 懒同步索引 → 向量检索 top-8 → 复用「报告总结」模型组织回答，回答附可跳转引用
+- 新模块 `core/indexer.py`（md 分块 → SQLite 索引 `data/rag_index.db` → 懒同步 →
+  numpy 余弦检索，自带 `--selfcheck`）与 `core/ask.py`（带编号上下文 + prompt + CLI）；
+  `llm.py` 抽出 `_post_endpoint` 供 chat/embeddings 共用直连优先+代理回退，新增
+  `embed_texts` / `test_embedding`
+- 索引范围 records/*.md + reports/*.md（「分析失败」占位块跳过）；懒同步按内容 hash
+  diff 增量补嵌入，源文件删除即清索引，换向量化模型自动全量重建（meta 表记 model）
+- 向量化服务独立预设 `config.EMBED_PRESETS`（百炼/硅基流动/智谱/OpenAI；
+  DeepSeek/Kimi 无公开 embeddings 端点故不列）；Key 走 `MODEL_KEY_EMBED_<供应商>`，
+  与对话选同一家供应商时自动复用已存 Key；新依赖 numpy
+
 ## 内存优化遗留方案（按收益排序，均未实施）
 1. **GPU 进程瘦身**（GPU ~300MB 是最大单项）：`--disable-gpu` 可砍大半但玻璃拟态 backdrop-filter 会卡；
    且 pywebview 6.2.1 把 AdditionalBrowserArguments 写死在 edgechromium.py:82，需 monkey-patch（升级易碎）
@@ -76,8 +89,37 @@
 - 海外端点（如 NVIDIA NIM）直连受跨境波动影响：`llm._post_chat` 直连优先，
   连接级失败自动经系统代理重试一次并按端点记忆（进程内）——国内端点行为不变；
   代理工具需在线，否则海外端点不可用（报错已提示）
+- 问答检索（RAG）已配置并真机验证（2026-09-05）：百炼 text-embedding-v4
+  （Key 走 `MODEL_KEY_EMBED_DASHSCOPE`，测试返回维度 1024）；CLI 实测
+  「哪天修过字体显示的问题」准确命中 08-28 记录（跨用词语义命中）；
+  索引 6 文件 31 块，二次同步全 skipped。打包版要重跑 build.bat 部署后才带此功能
 
 ## 变更日志（摘要）
+
+### 2026-09-05 新功能：历史日志问答（RAG）
+- 需求先行：`docs/PRD-历史日志问答.md`（沿用 PRD 模板；四项关键决策——悬浮球问答/
+  记录+报告索引/API 向量化/引用可跳转，附假设清单与验收标准），实现与 PRD 一一对应
+- 后端：`core/indexer.py`（分块按 ## 小节 → 向量化 → SQLite BLOB float32 →
+  numpy 余弦检索，进程内向量缓存；`--selfcheck` 五项自检）+ `core/ask.py`
+  （检索 top-8 组装编号上下文 → 复用总结端点回答，CLI `python core/ask.py "问题"`）；
+  `llm.py` 增 /embeddings 封装（代理回退逻辑抽为 `_post_endpoint` 共用）
+- 桥接：`ask_question` / `get_embed_service` / `save_embed_service` /
+  `test_embed_connection`；clear_data 连带清派生索引；导出白名单加
+  `embed_provider`/`embed_services`（Key 照旧只在 .env）
+- 前端：悬浮球 + 对话浮层（加载/错误态/欢迎语）、引用卡片跳转（日报 → 时间线页
+  定位当天；报告 → 弹窗预览）、设置页「问答检索」面板（预设下拉/测试连接/保存）
+- 验证：indexer --selfcheck 全过（临时库+伪向量：占位跳过/幂等同步/检索命中/删除
+  清理/换模型重建）；伪造 LLM 的 ask() 端到端通过；真实数据分块核对；node --check；
+  真机问答待配置向量化 Key 后人工验证
+- **流式输出（同日补）**：`llm.call_chat_stream` 解析 SSE（`_post_endpoint` 加
+  stream 透传）；`ask.ask_stream` 增量回调；`AppApi.ask_question` 后台线程 +
+  evaluate_js 推送（80ms 节流，仿手动截屏模式，不阻塞 JS 桥）；前端
+  `__askDelta/__askDone/__askError` 回调逐字渲染。CLI 仍走一次性 ask()
+- **日期感知检索（同日补）**：`indexer.extract_dates` 从问题抽明确日期
+  （2026-08-28 / 8月28号 / 今天·昨天·前天；相对表达如"上周"不解析），命中日期
+  时只在当天块内检索、无匹配回退全局——embedding 对日期数字语义对齐弱，
+  显式过滤兜底。selfcheck 加第 6 项；真机验证"8月28号都做了什么"正确命中
+  （修复前同问题回答"没找到"）。仍待定：上周/上个月等相对时间、混合检索
 
 ### 2026-08-29 画面感知去重 + 自定义双模型 + 代理自动回退
 - **去重失效修复**：整屏 md5 被任务栏时钟/光标击穿（生产 58 成功 0 跳过），

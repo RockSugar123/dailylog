@@ -116,6 +116,52 @@ class AppApi(ui_api.Api):
         threading.Thread(target=run, daemon=True).start()
         return {"ok": True}
 
+    def ask_question(self, question: str) -> dict:
+        """历史日志问答（流式）：后台线程执行检索与生成，增量经 evaluate_js 推给前端。
+
+        同步跑会阻塞 JS 桥（几十秒生成期间窗口控制全部无响应），所以立即返回，
+        前端通过 window.__askDelta / __askDone / __askError 接收进度。增量推送按
+        80ms 节流，避免每个 token 一次跨桥调用的开销。
+        """
+        def push(js: str) -> None:
+            try:
+                self._window.evaluate_js(js)
+            except Exception:  # noqa: BLE001 窗口可能已关闭/最小化挂起
+                raise  # 让 on_delta 的异常冒泡中断流，止损后续无效生成
+
+        def run():
+            from core import ask  # noqa: PLC0415
+            state = {"buf": "", "last": time.monotonic()}
+
+            def on_delta(text: str) -> None:
+                state["buf"] += text
+                now = time.monotonic()
+                if now - state["last"] >= 0.08:
+                    push(f"window.__askDelta({json.dumps(state['buf'])})")
+                    state["buf"] = ""
+                    state["last"] = now
+
+            try:
+                result = ask.ask_stream(question, on_delta)
+                if state["buf"]:
+                    push(f"window.__askDelta({json.dumps(state['buf'])})")
+                push(f"window.__askDone({json.dumps(result, ensure_ascii=False)})")
+                _logger.info("问答完成（检索 %d 块）", len(result.get("citations", [])))
+            except ValueError as e:
+                try:
+                    push(f"window.__askError({json.dumps(str(e))})")
+                except Exception:  # noqa: BLE001 窗口已关闭
+                    pass
+            except Exception as e:  # noqa: BLE001 网络/服务错误要给浮层可读提示
+                _logger.error("问答失败: %s", e)
+                try:
+                    push(f"window.__askError({json.dumps(f'问答失败：{str(e)[:200]}')})")
+                except Exception:  # noqa: BLE001 窗口已关闭
+                    pass
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"ok": True, "started": True}
+
     def export_data_dialog(self) -> dict:
         """数据管理·导出：系统保存对话框选路径后写 JSON 备份。
 

@@ -354,6 +354,37 @@
         </div>
 
         <div class="panel">
+          <div class="panel-head">问答检索<span class="hint">「问一问」的向量化服务；同一供应商已配过对话 Key 时自动复用，无需重复粘贴</span></div>
+          <div class="settings-row">
+            <label for="embed-provider-btn">向量化供应商</label>
+            <div class="select-wrap" id="embed-provider-wrap">
+              <button class="select-btn" id="embed-provider-btn">加载中<span class="caret">▾</span></button>
+              <div class="select-pop" id="embed-provider-pop" hidden></div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label for="embed-model-input">模型名称</label>
+            <input type="text" id="embed-model-input" class="key-input" placeholder="留空用默认" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label for="key-embed">API Key</label>
+            <input type="password" id="key-embed" class="key-input" placeholder="粘贴 API Key（留空则沿用该供应商已配的 Key）" autocomplete="off" />
+            <button class="btn-ghost key-eye" id="key-embed-eye" title="显示/隐藏">🙈</button>
+            <button class="btn-primary" id="key-embed-test">测试连接</button>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="hint" id="key-embed-status">正在加载问答检索配置…</span>
+            <span class="set-spacer"></span>
+            <button class="btn-primary" id="embed-save">保存</button>
+          </div>
+          <div class="settings-row">
+            <label></label>
+            <span class="hint">切换模型后向量索引会在下次提问时自动重建，无需手动处理</span>
+          </div>
+        </div>
+
+        <div class="panel">
           <div class="panel-head">截图与记录</div>
           <div class="settings-row">
             <label for="theme-btn">界面皮肤</label>
@@ -488,6 +519,22 @@
       </section>
 
     </main>
+  </div>
+
+  <!-- 问答浮层：历史日志 RAG 问答（悬浮球 + 对话面板） -->
+  <button class="ask-fab" id="ask-fab" title="问一问历史记录">问</button>
+  <div class="ask-panel" id="ask-panel" hidden>
+    <header class="ask-head">
+      <span class="ask-title">问一问 · 历史记录</span>
+      <button class="ask-close" id="ask-close" aria-label="关闭">×</button>
+    </header>
+    <div class="ask-msgs" id="ask-msgs">
+      <div class="ask-welcome">用一句自然语言问过去的工作，比如：<br/>「上个月我都在忙什么」「哪天修过那个字体 bug」<br/>回答会附上可点击跳转的来源记录。</div>
+    </div>
+    <form class="ask-input-row" id="ask-form">
+      <input type="text" id="ask-input" placeholder="问问你的历史记录…" autocomplete="off" maxlength="200" />
+      <button class="btn-primary" id="ask-send" type="submit">发送</button>
+    </form>
   </div>
 
   <!-- 无边框窗口：右下角缩放手柄 -->

@@ -33,3 +33,4 @@ dailylog-backup-*.zip
 # 本地协作/密钥文件，不进仓库
 AGENTS.md
 .env
+错误日志总结.md

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from dotenv import set_key
 
-from core import analyze, backup, config, llm, summarize, todos, usage
+from core import analyze, ask, backup, config, indexer, llm, summarize, todos, usage
 
 TASK_NAME = "DailyLogCapture"
 USAGE_TASK_NAME = "DailyLogUsage"
@@ -424,6 +424,98 @@ class Api:
         """删除一条待办。"""
         return todos.remove(todo_id)
 
+    # ---------- 问答检索 ----------
+
+    def ask_question(self, question: str) -> dict:
+        """历史日志问答：懒同步索引 → 检索相关片段 → 总结模型回答（附引用）。"""
+        try:
+            return {"ok": True, **ask.ask(question)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:  # noqa: BLE001  网络/服务错误须给浮层可读提示，且落日志不吞
+            config.setup_logging().error("问答失败: %s", e)
+            return {"ok": False, "error": f"问答失败：{str(e)[:200]}"}
+
+    def get_embed_service(self) -> dict:
+        """问答检索设置回显：预设清单 + 各供应商已存模型/Key（Key 明文回显，同 get_model_service）。"""
+        services = {}
+        for pid, preset in config.EMBED_PRESETS.items():
+            svc = config.EMBED_SERVICES.get(pid)
+            if not isinstance(svc, dict):
+                svc = {}
+            services[pid] = {
+                "model": str(svc.get("model", "")).strip(),
+                "key": config.embed_key_for(pid),
+            }
+        return {
+            "ok": True,
+            "provider": config.EMBED_PROVIDER,
+            "services": services,
+            "presets": [
+                {"id": pid, "label": p["label"], "default_model": p["default_model"],
+                 "hint": p["hint"]}
+                for pid, p in config.EMBED_PRESETS.items()
+            ],
+        }
+
+    def save_embed_service(self, provider: str, model: str, key: str = "") -> dict:
+        """保存问答向量化服务：模型名写 settings.json，Key 写 .env（留空不改）。
+
+        与对话同供应商时 Key 可复用（embed_key_for 回退），无需重复粘贴。
+        模型变化后的索引重建由下次问答的 sync_index 按 meta 检测自动完成。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip()
+        preset = config.EMBED_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知向量化供应商: {provider}"}
+        services = {k: dict(v) for k, v in config.EMBED_SERVICES.items() if isinstance(v, dict)}
+        services.setdefault(provider, {})["model"] = (model or "").strip()
+        key = (key or "").strip()
+        if key:
+            env_name = f"MODEL_KEY_EMBED_{provider.upper()}"
+            try:
+                set_key(str(config.DATA_DIR / ".env"), env_name, key)
+            except OSError as e:
+                _logger.error("写入 .env 失败: %s", e)
+                return {"ok": False, "error": f"写入 .env 失败：{e}"}
+            os.environ[env_name] = key  # .env 只在启动时加载，同步进程环境
+        _write_settings(embed_provider=provider, embed_services=services)
+        config.EMBED_SERVICES.clear()
+        config.EMBED_SERVICES.update(services)
+        config._apply_embed_service()
+        # 只记供应商与模型名，不记 Key
+        _logger.info("问答检索配置已更新：%s / %s", provider, config.EMBED_MODEL)
+        return {"ok": True, "provider": provider, "model": config.EMBED_MODEL,
+                "has_key": bool(config.EMBED_API_KEY), "key_hint": _key_hint(config.EMBED_API_KEY)}
+
+    def test_embed_connection(self, provider: str = "", model: str = "", key: str = "") -> dict:
+        """问答检索"测试连接"：对表单草稿（供应商/模型/Key）向量化一条极短文本。
+
+        Key/模型留空时回退到该端点已保存值（再回退复用 Key/预设默认）。
+        """
+        _logger = config.setup_logging()
+        provider = (provider or "").strip() or config.EMBED_PROVIDER
+        preset = config.EMBED_PRESETS.get(provider)
+        if not preset:
+            return {"ok": False, "error": f"未知向量化供应商: {provider}"}
+        if not model or not str(model).strip():
+            svc = config.EMBED_SERVICES.get(provider)
+            model = (str(svc.get("model", "")).strip()
+                     if isinstance(svc, dict) else "") or preset["default_model"]
+        model = str(model).strip()
+        key = (key or "").strip() or config.embed_key_for(provider)
+        if not key:
+            return {"ok": False, "error": "尚未配置 API Key，请先填写并保存（同供应商已配对话 Key 可直接复用）"}
+        result = llm.test_embedding(preset["base_url"], key, model)
+        if result.get("ok"):
+            _logger.info("问答检索测试通过：%s / %s（维度 %s）",
+                         provider, model, result.get("dim", 0))
+        else:
+            _logger.warning("问答检索测试失败（%s / %s）：%s",
+                            provider, model, result.get("error", ""))
+        return result
+
     # ---------- 设置 ----------
 
     def get_config(self) -> dict:
@@ -761,6 +853,7 @@ class Api:
         "retention_days", "recording_enabled", "dedup_enabled",
         "enter_capture_enabled", "enter_capture_interval", "usage_enabled", "theme",
         "model_provider", "model_services",
+        "embed_provider", "embed_services",
         "backup_enabled", "backup_dir", "backup_weekday", "backup_hour", "backup_keep",
     )
 
@@ -852,6 +945,7 @@ class Api:
         _unlink(list(config.REPORTS_DIR.glob("*.md")), "reports")
         _unlink(list(config.USAGE_DIR.glob("*.jsonl")))      # 应用使用时长数据一并清除
         _unlink(list(config.SCREENSHOTS_DIR.glob("*.png")))  # 孤儿截图一并清除
+        _unlink([indexer.DB_PATH])  # 问答检索派生索引一并清除（可由源文件懒同步重建）
         logger = logging.getLogger("dailylog")
         for h in logger.handlers[:]:
             h.close()

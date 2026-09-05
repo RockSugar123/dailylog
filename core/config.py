@@ -192,6 +192,72 @@ def _apply_model_service() -> None:
 MODEL_PROVIDER = str(SETTINGS.get("model_provider", "")).strip() or _default_provider()
 _apply_model_service()
 
+# ---------- 问答检索（RAG）：向量化服务 ----------
+# 只列确实提供 embedding 模型的供应商（DeepSeek/Kimi 无公开 embeddings 端点）。
+# base_url 以代码为准；settings.json 存 embed_provider 与 embed_services:{pid:{model}}，
+# Key 走 .env 的 MODEL_KEY_EMBED_<PID>；与对话选了同一家供应商时直接复用那把 Key。
+EMBED_PRESETS = {
+    "dashscope": {
+        "label": "阿里云百炼 · text-embedding-v4",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "default_model": "text-embedding-v4",
+        "hint": "推荐：与百炼对话 Key 通用，新用户含 100 万 Token 免费额度",
+    },
+    "siliconflow": {
+        "label": "硅基流动 · BGE-M3",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "default_model": "BAAI/bge-m3",
+        "hint": "在硅基流动（cloud.siliconflow.cn）获取 API Key",
+    },
+    "zhipu": {
+        "label": "智谱开放平台 · embedding-3",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "default_model": "embedding-3",
+        "hint": "在智谱开放平台（open.bigmodel.cn）获取 API Key",
+    },
+    "openai": {
+        "label": "OpenAI · text-embedding-3-small",
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "text-embedding-3-small",
+        "hint": "在 OpenAI 平台（platform.openai.com）获取 API Key；海外端点需系统代理",
+    },
+}
+
+EMBED_SERVICES = SETTINGS.get("embed_services")
+if not isinstance(EMBED_SERVICES, dict):
+    EMBED_SERVICES = {}
+
+
+def embed_key_for(provider: str) -> str:
+    """问答向量化 Key：.env 的 MODEL_KEY_EMBED_<PID> 优先；同供应商已配对话 Key 时复用。"""
+    own = os.getenv(f"MODEL_KEY_EMBED_{provider.upper()}", "").strip()
+    if own:
+        return own
+    if provider == MODEL_PROVIDER:
+        return model_key_for(provider)
+    return ""
+
+
+def _apply_embed_service() -> None:
+    """把当前向量化配置解析进模块级变量（导入时与设置页保存后各执行一次）。"""
+    global EMBED_PROVIDER, EMBED_BASE_URL, EMBED_MODEL, EMBED_API_KEY
+    provider = str(SETTINGS.get("embed_provider", "")).strip() or "dashscope"
+    if provider not in EMBED_PRESETS:
+        provider = "dashscope"
+    EMBED_PROVIDER = provider
+    EMBED_BASE_URL = EMBED_PRESETS[provider]["base_url"]
+    svc = EMBED_SERVICES.get(provider)
+    model = str(svc.get("model", "")).strip() if isinstance(svc, dict) else ""
+    EMBED_MODEL = model or EMBED_PRESETS[provider]["default_model"]
+    EMBED_API_KEY = embed_key_for(provider)
+
+
+_apply_embed_service()
+
+# 问答检索参数
+EMBED_BATCH = 10   # 单次 /embeddings 请求的文本条数上限（百炼 text-embedding-v4 限制 10）
+ASK_TOP_K = 8      # 每次问答召回的相关片段数
+
 # 截图分析采样参数（固定常量，与供应商无关；analyze.py 调用点）
 ANALYZE_TEMPERATURE = 1
 ANALYZE_TOP_P = 0.95

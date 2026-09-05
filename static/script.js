@@ -1084,6 +1084,125 @@ document.getElementById("ed-regen").addEventListener("click", async () => {
   toast("已重新生成并回填");
 });
 
+/* ===================== 问答浮层（历史日志 RAG 问答） ===================== */
+
+let askBusy = false;
+
+function toggleAskPanel(open) {
+  const panel = document.getElementById("ask-panel");
+  const show = open === undefined ? panel.hidden : !!open;
+  panel.hidden = !show;
+  if (show) setTimeout(() => document.getElementById("ask-input").focus(), 60);
+}
+document.getElementById("ask-fab").addEventListener("click", () => toggleAskPanel());
+document.getElementById("ask-close").addEventListener("click", () => toggleAskPanel(false));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("ask-panel").hidden) toggleAskPanel(false);
+});
+
+/* 引用卡片文案：日报带时间段，报告用文件名（去 .md） */
+function askCiteLabel(c) {
+  const type = c.source === "report" ? "报告" : "日报";
+  const where = c.source === "report"
+    ? (c.name || "").replace(/\.md$/, "")
+    : `${c.date || ""} ${c.time || ""}`.trim();
+  return `${type} · ${where} · ${c.heading || ""}`;
+}
+
+/* 点引用跳来源：日报 → 时间线页定位到当天；报告 → 弹出报告内容 */
+function jumpToCitation(c) {
+  toggleAskPanel(false);
+  if (c.source === "report" && c.name) {
+    switchPage("reports");
+    apiCall("get_report", c.name).then((r) => {
+      if (r && r.ok) openModal(r.name, `<div class="md-body">${mdToHtml(r.content)}</div>`);
+      else openReportEditor(c.name);
+    });
+  } else if (c.date && isValidTimelineDate(c.date)) {
+    switchPage("timeline");
+    applyRange(c.date, c.date);
+  }
+}
+
+function renderAskAnswer(box, r) {
+  const cites = r.citations || [];
+  box.innerHTML = `<div class="ask-answer">${mdToHtml(r.answer || "")}</div>` +
+    (cites.length ? `<div class="ask-cites">${cites.map((c, i) =>
+      `<button type="button" class="ask-cite" data-i="${i}" title="跳转到来源记录">` +
+      `<span class="ask-cite-n">${i + 1}</span>${escapeHtml(askCiteLabel(c))}</button>`).join("")}</div>` : "");
+  box.querySelectorAll(".ask-cite").forEach((btn) => {
+    btn.addEventListener("click", () => jumpToCitation(cites[Number(btn.dataset.i)]));
+  });
+}
+
+/* 流式接收：后端线程经 evaluate_js 推增量/完成/失败（ask_question 立即返回不阻塞桥） */
+let askStreamText = "";
+let askStreamBot = null;
+
+window.__askDelta = (text) => {
+  if (!askStreamBot) return;
+  askStreamText += text;
+  askStreamBot.innerHTML = `<div class="ask-answer">${mdToHtml(askStreamText)}</div>`;
+  const msgs = document.getElementById("ask-msgs");
+  msgs.scrollTop = msgs.scrollHeight;
+};
+window.__askDone = (r) => {
+  if (!askStreamBot) return;
+  askBusy = false;
+  document.getElementById("ask-send").disabled = false;
+  renderAskAnswer(askStreamBot, r);
+  askStreamBot = null;
+  askStreamText = "";
+  document.getElementById("ask-msgs").scrollTop = document.getElementById("ask-msgs").scrollHeight;
+};
+window.__askError = (msg) => {
+  if (!askStreamBot) return;
+  askBusy = false;
+  document.getElementById("ask-send").disabled = false;
+  askStreamBot.innerHTML = `<span class="ask-err">${escapeHtml(msg || "问答失败")}</span>`;
+  askStreamBot = null;
+  askStreamText = "";
+};
+
+document.getElementById("ask-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (askBusy) return;
+  const input = document.getElementById("ask-input");
+  const q = input.value.trim();
+  if (!q) return;
+  const msgs = document.getElementById("ask-msgs");
+  const welcome = msgs.querySelector(".ask-welcome");
+  if (welcome) welcome.remove();
+  input.value = "";
+  askBusy = true;
+  document.getElementById("ask-send").disabled = true;
+  const user = document.createElement("div");
+  user.className = "ask-msg ask-msg-user";
+  user.textContent = q;
+  msgs.appendChild(user);
+  askStreamBot = document.createElement("div");
+  askStreamBot.className = "ask-msg ask-msg-bot";
+  askStreamBot.innerHTML = '<span class="ask-loading">正在检索历史记录…（首次提问会先建索引，稍慢）</span>';
+  msgs.appendChild(askStreamBot);
+  msgs.scrollTop = msgs.scrollHeight;
+  askStreamText = "";
+  const r = await apiCall("ask_question", q);
+  // 提交失败/后端拒绝时立刻恢复；成功启动流式后由 __askDone/__askError 收尾
+  if (!r) {
+    askBusy = false;
+    document.getElementById("ask-send").disabled = false;
+    if (askStreamBot) askStreamBot.innerHTML = '<span class="ask-err">未连接到后端</span>';
+    askStreamBot = null;
+    return;
+  }
+  if (!r.ok) {
+    askBusy = false;
+    document.getElementById("ask-send").disabled = false;
+    if (askStreamBot) askStreamBot.innerHTML = `<span class="ask-err">${escapeHtml(r.error || "问答失败")}</span>`;
+    askStreamBot = null;
+  }
+});
+
 /* ===================== 设置页 ===================== */
 
 let currentInterval = 10;
@@ -1178,6 +1297,7 @@ async function loadSettings() {
     (v) => { currentBackupKeep = Number(v); autoSave(apiCall("set_backup_settings", null, null, null, null, currentBackupKeep), "备份保留份数"); }, currentBackupKeep);
   loadBackupInfo();
   await fillModelService(cfg);  // 回填供应商下拉与模型服务配置（Key 以星号态常驻输入框）
+  fillEmbedService();           // 回填问答检索配置（不阻塞其余设置项渲染）
   updateStatus(cfg);
   loadDbStats();
 }
@@ -1412,6 +1532,92 @@ document.getElementById("model-save").addEventListener("click", async () => {
     }
     const cfg = await apiCall("get_config");  // 同步"当前状态"面板
     if (cfg) updateStatus(cfg);
+  } else {
+    toast((r && r.error) || "保存失败", 5000);
+  }
+});
+
+/* ===================== 设置页 · 问答检索（向量化服务） ===================== */
+
+let embedPresets = [];   // 后端下发：{id,label,default_model,hint}
+let embedServiceCache = {};   // pid → {model,key}
+let currentEmbedProvider = "";
+
+function embedPresetById(id) { return embedPresets.find((p) => p.id === id); }
+
+function setEmbedStatus(text, cls) {
+  const el = document.getElementById("key-embed-status");
+  el.textContent = text;
+  el.classList.remove("key-result-ok", "key-result-bad");
+  if (cls) el.classList.add(cls);
+}
+
+// 切向量化供应商：模型名/Key 联动换成该供应商已保存的（没保存过则为空白）
+function applyEmbedProviderUI(id) {
+  const p = embedPresetById(id) || {};
+  const svc = embedServiceCache[id] || {};
+  currentEmbedProvider = id;
+  document.getElementById("embed-model-input").value = svc.model || "";
+  document.getElementById("key-embed").value = svc.key || "";
+  document.getElementById("embed-model-input").placeholder =
+    p.default_model ? `留空用默认 ${p.default_model}` : "填写模型名称";
+  if (svc.key) setEmbedStatus(`已配置 ${maskKey(svc.key)}，可点"测试连接"验证`, "key-result-ok");
+  else setEmbedStatus(p.hint || "");
+}
+
+async function fillEmbedService() {
+  const r = await apiCall("get_embed_service");
+  embedPresets = (r && r.presets) || [];
+  if (r && r.ok) {
+    embedServiceCache = r.services || {};
+    currentEmbedProvider = r.provider || embedPresets[0]?.id || "dashscope";
+  } else {
+    currentEmbedProvider = embedPresets[0]?.id || "dashscope";
+  }
+  if (!embedPresets.length) {
+    setEmbedStatus("未连接到后端，无法加载问答检索配置", "key-result-bad");
+    return;
+  }
+  setupSelect("embed-provider-pop", "embed-provider-btn", embedPresets.map((p) => p.id),
+    (id) => (embedPresetById(id) || {}).label || id,
+    (id) => { applyEmbedProviderUI(id); }, currentEmbedProvider);
+  applyEmbedProviderUI(currentEmbedProvider);
+}
+
+document.getElementById("key-embed-eye").addEventListener("click", () => {
+  const inp = document.getElementById("key-embed");
+  const btn = document.getElementById("key-embed-eye");
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "👁"; }
+  else { inp.type = "password"; btn.textContent = "🙈"; }
+});
+
+// 测的是表单草稿（供应商/模型/Key），Key 留空时后端回退用已保存的（含同供应商对话 Key 复用）
+document.getElementById("key-embed-test").addEventListener("click", async () => {
+  const btn = document.getElementById("key-embed-test");
+  btn.disabled = true;
+  setEmbedStatus("测试中，请稍候…");
+  const r = await apiCall("test_embed_connection", currentEmbedProvider,
+    document.getElementById("embed-model-input").value.trim(),
+    document.getElementById("key-embed").value.trim());
+  btn.disabled = false;
+  if (r && r.ok) setEmbedStatus(`✓ 连接成功 · 向量维度 ${r.dim}`, "key-result-ok");
+  else setEmbedStatus(`✗ ${(r && r.error) || "测试失败，请查看日志"}`, "key-result-bad");
+});
+
+// 保存：模型名写 settings.json，Key 写 .env（留空不改，沿用已保存/复用值）
+document.getElementById("embed-save").addEventListener("click", async () => {
+  const r = await apiCall("save_embed_service", currentEmbedProvider,
+    document.getElementById("embed-model-input").value.trim(),
+    document.getElementById("key-embed").value.trim());
+  if (r && r.ok) {
+    if (r.has_key) setEmbedStatus(`已配置 ${r.key_hint}，可点"测试连接"验证`, "key-result-ok");
+    else setEmbedStatus("已保存，但该供应商尚未配置 API Key", "key-result-bad");
+    toast(`问答检索已保存：${r.provider} · ${r.model}`);
+    const fresh = await apiCall("get_embed_service");
+    if (fresh && fresh.ok) {
+      embedServiceCache = fresh.services || embedServiceCache;
+      applyEmbedProviderUI(currentEmbedProvider);
+    }
   } else {
     toast((r && r.error) || "保存失败", 5000);
   }
