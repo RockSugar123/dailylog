@@ -3,7 +3,7 @@
 > 约定：只维护这一个状态文档。每次会话结束时更新「当前状态」「遗留 / 注意事项」，
 > 过程性记录压缩进「变更日志」。历史详情见 git log。
 
-## 当前架构要点（截至 2026-09-05）
+## 当前架构要点（截至 2026-09-06）
 
 ### 目录结构
 - `core/`：业务模块（config / llm / analyze / capture / summarize / usage / todos）
@@ -69,6 +69,23 @@
   DeepSeek/Kimi 无公开 embeddings 端点故不列）；Key 走 `MODEL_KEY_EMBED_<供应商>`，
   与对话选同一家供应商时自动复用已存 Key；新依赖 numpy
 
+### 问答历史会话（2026-09-06 落地）
+- `core/sessions.py`：`data/sessions/` 每会话一个 JSON（id/标题/`title_source`
+  temp|ai|manual/消息数组，回答带 citations），原子写 + 模块锁串行化后台线程与
+  JS 桥的读写；**只有完整一问一答才落盘**（生成失败不存）；永久保留、仅手动删除
+- 多轮追问：`ask._run()` 统一一次性与流式路径。`session_id` 三态——已有 id 续写 /
+  空串新建 / `None` 不落盘（CLI 专用）；追问先由总结模型把问题结合最近
+  `ASK_REWRITE_TURNS`(3) 轮改写成独立检索词再向量检索（改写失败回退原文仅落日志），
+  回答 prompt 带最近 `ASK_ANSWER_TURNS`(6) 轮上下文；每轮都重新检索
+- AI 起名：首轮落盘后 `maybe_generate_title` 提炼一次（≤16 字，剥引号取首行），
+  manual 之后不覆盖、失败保留临时标题只落日志；app.py 在 `__askDone` **之后**
+  异步起名（不拖慢输入框恢复），经 `__askTitle` 推送前端
+- 桥接：`ui_api.list/get/rename/delete_ask_session` + `ask_question(question, session_id)`；
+  前端重启后经 localStorage 恢复上次会话
+- 浮层 UI（三轮迭代定稿）：480×640，头部 ☰ 历史 / ＋ 新建；历史列表为**悬浮于消息区
+  上部约 55% 的浮层**（下方对话仍可见），列表内原地重命名 + 两步确认删除；
+  流式期间锁定 ☰/＋ 防结果落错会话
+
 ## 内存优化遗留方案（按收益排序，均未实施）
 1. **GPU 进程瘦身**（GPU ~300MB 是最大单项）：`--disable-gpu` 可砍大半但玻璃拟态 backdrop-filter 会卡；
    且 pywebview 6.2.1 把 AdditionalBrowserArguments 写死在 edgechromium.py:82，需 monkey-patch（升级易碎）
@@ -92,9 +109,31 @@
 - 问答检索（RAG）已配置并真机验证（2026-09-05）：百炼 text-embedding-v4
   （Key 走 `MODEL_KEY_EMBED_DASHSCOPE`，测试返回维度 1024）；CLI 实测
   「哪天修过字体显示的问题」准确命中 08-28 记录（跨用词语义命中）；
-  索引 6 文件 31 块，二次同步全 skipped。打包版要重跑 build.bat 部署后才带此功能
+  索引 6 文件 31 块，二次同步全 skipped。历史会话功能已真机验证（2026-09-06）：
+  新建会话 + 跨重启从历史续聊落盘正确，日志无报错；打包版自 1.2.0 起包含
+- **浮层/弹窗底色走 `--overlay` 变量**（2026-09-06）：浅色皮肤（paper/journal/
+  mint/sakura）各自覆盖浅色值；新加浮层类 UI 一律用该变量，勿写死深底
+  （.toast 是刻意钉死深底浅字的唯一例外，有注释）
 
 ## 变更日志（摘要）
+
+### 2026-09-06 新功能：问答历史会话 + 浅色皮肤对比度修复
+- 需求先行：grill-me 澄清五项决策（持久化+多轮/模型改写检索词/浮层内入口/
+  永久保留仅手动删/首轮后 AI 起名+手动改名优先），输出需求确认单后实施
+- 后端：新增 `core/sessions.py`（会话存档）；`core/ask.py` 重构为 `_run` 统一
+  路径（多轮上下文 + 检索词改写 + 标题提炼）；`core/config.py` 加 SESSIONS_DIR
+  与轮数常量；`ui_api.py` 会话 CRUD 四接口；`app.py` 流式线程带 session_id、
+  `__askDone` 后异步起名经 `__askTitle` 推送。CLI（`python core/ask.py`）
+  按需求确认单保持一次性问答不落盘（`session_id=None`）
+- 前端：浮层头部 ☰/＋、历史列表（上部 55% 浮层）、原地重命名、两步确认删除、
+  localStorage 恢复上次会话；UI 三轮迭代——面板内左右分栏（切换 bug 致弃）→
+  左上角级联悬浮窗（用户否决）→ 上部浮层（定稿）
+- **皮肤对比度修复**：`.ask-panel`/`.modal` 写死深底改 `--overlay` 变量
+  （:root 默认深色不变，4 套浅色皮肤各覆盖浅色值）；modal 白色系边框/表头/
+  关闭按钮换主题变量；`.toast` 维持钉死深底浅字不变
+- 验证：headless 功能测试全过（会话 CRUD/排序稳定性/损坏文件跳过/多轮上下文
+  注入/改写触发/起名保护/CLI 不落盘）；`usage.py --selfcheck` 过；node --check 过；
+  真机验证新建会话与跨重启历史续聊（日志 + sessions 落盘核对一致）
 
 ### 2026-09-05 新功能：历史日志问答（RAG）
 - 需求先行：`docs/PRD-历史日志问答.md`（沿用 PRD 模板；四项关键决策——悬浮球问答/
